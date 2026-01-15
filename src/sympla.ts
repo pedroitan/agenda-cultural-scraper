@@ -120,6 +120,94 @@ function extractNextData(html: string): any {
   }
 }
 
+function extractEventFromHtml(html: string, eventId: string, url: string, input: ScraperInput): EventInput | null {
+  // Try to extract event data from __NEXT_DATA__ in the event page
+  const nextData = extractNextData(html)
+  if (nextData) {
+    // Look for event data in pageProps
+    const pageProps = nextData?.props?.pageProps
+    const eventData = pageProps?.event || pageProps?.data || pageProps
+    
+    if (eventData && (eventData.name || eventData.title)) {
+      const title = eventData.name || eventData.title
+      const startDate = eventData.start_date || eventData.startDate || eventData.date
+      const venueName = eventData.venue?.name || eventData.venueName || eventData.location?.name || eventData.address?.name
+      const imageUrl = eventData.image || eventData.imageUrl || eventData.banner || eventData.cover
+      const isFree = eventData.is_free || eventData.isFree || eventData.free || false
+      const price = eventData.price || eventData.price_text || eventData.priceText
+      
+      if (title && startDate) {
+        return {
+          source: input.source,
+          external_id: eventId,
+          title,
+          start_datetime: startDate,
+          city: input.city,
+          venue_name: venueName,
+          image_url: imageUrl,
+          is_free: Boolean(isFree),
+          price_text: price,
+          url,
+          raw_payload: eventData,
+        }
+      }
+    }
+  }
+  
+  // Fallback: extract from meta tags and structured data
+  const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/) ||
+                     html.match(/<title>([^<]+)<\/title>/)
+  const imageMatch = html.match(/<meta property="og:image" content="([^"]+)"/)
+  const descMatch = html.match(/<meta property="og:description" content="([^"]+)"/)
+  
+  // Try to find date from structured data or text
+  const dateMatch = html.match(/(\d{1,2})\s+de\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*\s+(?:de\s+)?(\d{4})?/i) ||
+                    html.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/)
+  
+  // Try to find venue
+  const venueMatch = html.match(/<[^>]*class="[^"]*venue[^"]*"[^>]*>([^<]+)</) ||
+                     html.match(/<[^>]*class="[^"]*location[^"]*"[^>]*>([^<]+)</)
+  
+  const title = titleMatch ? titleMatch[1].replace(/ - Sympla$| \| Sympla$/i, '').trim() : null
+  
+  if (!title) return null
+  
+  // Parse date
+  let startDatetime: string
+  if (dateMatch) {
+    if (dateMatch[0].includes('T')) {
+      startDatetime = dateMatch[0]
+    } else {
+      const months: Record<string, string> = {
+        jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06',
+        jul: '07', ago: '08', set: '09', out: '10', nov: '11', dez: '12'
+      }
+      const day = dateMatch[1].padStart(2, '0')
+      const month = months[dateMatch[2].toLowerCase().slice(0, 3)]
+      const year = dateMatch[3] || new Date().getFullYear().toString()
+      startDatetime = `${year}-${month}-${day}T19:00:00`
+    }
+  } else {
+    // Default to 30 days from now if no date found
+    const futureDate = new Date()
+    futureDate.setDate(futureDate.getDate() + 30)
+    startDatetime = futureDate.toISOString()
+  }
+  
+  return {
+    source: input.source,
+    external_id: eventId,
+    title,
+    start_datetime: startDatetime,
+    city: input.city,
+    venue_name: venueMatch ? venueMatch[1].trim() : undefined,
+    image_url: imageMatch ? imageMatch[1] : undefined,
+    is_free: false,
+    url,
+    raw_payload: { title, dateMatch: dateMatch?.[0], venueMatch: venueMatch?.[1] },
+  }
+}
+
 function findEventsInObject(obj: any, events: any[] = []): any[] {
   if (!obj || typeof obj !== 'object') return events
   
@@ -195,23 +283,29 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
         const uniqueLinks = [...new Set(eventLinks.map(l => l.replace(/href="|"/g, '')))]
         console.log(`Found ${uniqueLinks.length} event links in HTML for ${category}`)
         
+        // Fetch details for each event
         for (const link of uniqueLinks) {
-          // Extract event ID from URL
           const idMatch = link.match(/\/evento\/[^/]+-(\d+)$/) || link.match(/\/event\/(\d+)/)
-          if (idMatch) {
-            const eventId = idMatch[1]
-            const event: EventInput = {
-              source: input.source,
-              external_id: eventId,
-              title: `Event ${eventId}`, // Will be updated when we fetch details
-              start_datetime: new Date().toISOString(), // Placeholder
-              city: input.city,
-              url: link,
-              is_free: false,
-              raw_payload: { link },
+          if (!idMatch) continue
+          
+          const eventId = idMatch[1]
+          items_fetched++
+          
+          try {
+            console.log(`Fetching event details: ${link}`)
+            const eventHtml = await fetchHtmlWithRetry(link, headers)
+            const eventData = extractEventFromHtml(eventHtml, eventId, link, input)
+            
+            if (eventData) {
+              valid.push(eventData)
+            } else {
+              invalid_count++
             }
-            valid.push(event)
-            items_fetched++
+            
+            await delay(500) // Small delay between event fetches
+          } catch (err) {
+            console.error(`Error fetching event ${eventId}:`, err)
+            invalid_count++
           }
         }
       }
