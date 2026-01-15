@@ -54,33 +54,40 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     console.log(`  Initial events on page: ${initialCount}`)
 
     while (clickCount < maxClicks) {
-      // Use the exact selector: #load_more_events
-      const loadMoreButton = page.locator('#load_more_events').first()
-      
-      // Wait for button to be visible
-      try {
-        await loadMoreButton.waitFor({ state: 'visible', timeout: 5000 })
-      } catch {
-        console.log('  Load more button not found, stopping')
+      // First scroll to bottom to ensure button is visible
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+      await page.waitForTimeout(1000)
+
+      // Try to find and click the load more button using JavaScript
+      const clicked = await page.evaluate(() => {
+        const btn = document.querySelector('#load_more_events') as HTMLElement
+        if (btn && btn.offsetParent !== null) { // Check if visible
+          btn.click()
+          return true
+        }
+        return false
+      })
+
+      if (!clicked) {
+        console.log('  Load more button not found or not visible, stopping')
         break
       }
 
-      const currentEventCount = await page.locator('a[href*="/event/"]').count()
-      console.log(`  Events: ${currentEventCount}, clicking Load more (${clickCount + 1})`)
+      console.log(`  Clicked Load more (${clickCount + 1})`)
       
-      // Click and wait for network to settle
-      await loadMoreButton.click()
-      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
-      await page.waitForTimeout(1000)
+      // Wait for AJAX to complete
+      await page.waitForTimeout(2000)
       
-      // Scroll to bottom of page to trigger content loading
+      // Scroll to bottom again to load lazy content
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
       await page.waitForTimeout(1500)
       clickCount++
       
       // Check if new events were loaded
       const newEventCount = await page.locator('a[href*="/event/"]').count()
-      if (newEventCount === previousEventCount && clickCount > 5) {
+      console.log(`  Events on page: ${newEventCount}`)
+      
+      if (newEventCount === previousEventCount && clickCount > 3) {
         console.log(`  No new events loaded (still ${newEventCount}), stopping`)
         break
       }
