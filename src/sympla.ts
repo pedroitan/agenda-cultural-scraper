@@ -403,28 +403,57 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
 
   console.log(`Target: ${maxEventsTarget} events`)
 
-  // Phase 1: Extract events directly from listing pages
+  // Category names in Portuguese
+  const categoryNames: Record<string, string> = {
+    'show-musica-festa': 'Shows e Festas',
+    'teatro-espetaculo': 'Teatro',
+    'gastronomico': 'Gastronomia',
+    'curso-workshop': 'Cursos',
+    'congresso-palestra': 'Palestras',
+    'experiencias': 'Experiências',
+    'infantil': 'Infantil',
+    'religioso-espiritual': 'Religioso',
+    'saude-e-bem-estar': 'Bem-estar',
+    'arte-e-cultura': 'Arte e Cultura',
+    'games-e-geek': 'Games e Geek',
+    'gratis': 'Gratuito',
+  }
+
+  // Phase 1: Extract events directly from listing pages (with pagination)
   for (const category of categories) {
-    if (valid.length >= maxEventsTarget) break
+    const categoryName = categoryNames[category] || category
     
-    const url = `https://www.sympla.com.br/eventos/salvador-ba/${category}`
-    console.log(`Fetching category: ${url}`)
-    
-    try {
-      const html = await fetchHtmlWithRetry(url, headers)
-      const events = extractEventsFromListingHtml(html, input)
+    // Paginate through pages until no new events found
+    for (let page = 1; page <= 20; page++) {
+      const url = page === 1 
+        ? `https://www.sympla.com.br/eventos/salvador-ba/${category}`
+        : `https://www.sympla.com.br/eventos/salvador-ba/${category}?page=${page}`
+      console.log(`Fetching: ${url}`)
       
-      for (const ev of events) {
-        if (seenIds.has(ev.external_id)) continue
-        seenIds.add(ev.external_id)
-        valid.push(ev)
-        items_fetched++
+      try {
+        const html = await fetchHtmlWithRetry(url, headers)
+        const events = extractEventsFromListingHtml(html, input)
+        
+        let newEventsCount = 0
+        for (const ev of events) {
+          if (seenIds.has(ev.external_id)) continue
+          seenIds.add(ev.external_id)
+          ev.category = categoryName // Add category
+          valid.push(ev)
+          items_fetched++
+          newEventsCount++
+        }
+        
+        console.log(`  Page ${page}: ${newEventsCount} new events, total: ${valid.length}`)
+        
+        // Stop pagination if no new events on this page
+        if (newEventsCount === 0) break
+        
+        await delay(requestDelayMs)
+      } catch (err) {
+        console.error(`Error fetching ${url}:`, err)
+        break
       }
-      
-      console.log(`  Extracted ${events.length} events, total valid: ${valid.length}`)
-      await delay(requestDelayMs)
-    } catch (err) {
-      console.error(`Error fetching ${url}:`, err)
     }
   }
 

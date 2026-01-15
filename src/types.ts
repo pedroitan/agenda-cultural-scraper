@@ -15,6 +15,7 @@ export type EventInput = {
   is_free: boolean
   min_price?: number
   price_text?: string
+  category?: string
   url: string
   raw_payload: unknown
 }
