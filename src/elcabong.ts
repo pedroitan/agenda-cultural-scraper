@@ -34,43 +34,57 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
   const page = await browser.newPage()
 
   try {
-    await page.goto('https://elcabong.com.br/agenda/', { waitUntil: 'networkidle' })
+    await page.goto('https://elcabong.com.br/agenda/', { waitUntil: 'networkidle', timeout: 60000 })
     console.log('Page loaded')
+
+    // Wait for initial content
+    await page.waitForTimeout(3000)
+
+    // Debug: log page content
+    const pageTitle = await page.title()
+    console.log(`  Page title: ${pageTitle}`)
 
     // Click "Load more events" button until no more events load
     let clickCount = 0
     const maxClicks = 100
     let previousEventCount = 0
 
+    // Initial event count
+    const initialCount = await page.locator('a[href*="/event/"]').count()
+    console.log(`  Initial events on page: ${initialCount}`)
+
     while (clickCount < maxClicks) {
-      // Count current events
-      const currentEventCount = await page.locator('a[href*="/event/"]').count()
-      console.log(`  Current events on page: ${currentEventCount}`)
-
-      // Use the exact selector: #load_more_events or .load_more_events
-      const loadMoreButton = page.locator('#load_more_events, .load_more_events').first()
-      const isVisible = await loadMoreButton.isVisible().catch(() => false)
-
-      if (isVisible) {
-        console.log(`  Clicking "Load more events" (${clickCount + 1})`)
-        await loadMoreButton.click()
-        await page.waitForTimeout(2000) // Wait for content to load
-        clickCount++
-        
-        // Check if new events were loaded
-        const newEventCount = await page.locator('a[href*="/event/"]').count()
-        if (newEventCount === previousEventCount && clickCount > 3) {
-          console.log('  No new events loaded, stopping')
-          break
-        }
-        previousEventCount = newEventCount
-      } else {
-        console.log('  Load more button not visible, stopping')
+      // Use the exact selector: #load_more_events
+      const loadMoreButton = page.locator('#load_more_events').first()
+      
+      // Wait for button to be visible
+      try {
+        await loadMoreButton.waitFor({ state: 'visible', timeout: 5000 })
+      } catch {
+        console.log('  Load more button not found, stopping')
         break
       }
+
+      const currentEventCount = await page.locator('a[href*="/event/"]').count()
+      console.log(`  Events: ${currentEventCount}, clicking Load more (${clickCount + 1})`)
+      
+      // Click and wait for network to settle
+      await loadMoreButton.click()
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
+      await page.waitForTimeout(1500)
+      clickCount++
+      
+      // Check if new events were loaded
+      const newEventCount = await page.locator('a[href*="/event/"]').count()
+      if (newEventCount === previousEventCount && clickCount > 5) {
+        console.log(`  No new events loaded (still ${newEventCount}), stopping`)
+        break
+      }
+      previousEventCount = newEventCount
     }
 
-    console.log(`  Clicked ${clickCount} times, now extracting events...`)
+    const finalCount = await page.locator('a[href*="/event/"]').count()
+    console.log(`  Clicked ${clickCount} times, final events: ${finalCount}`)
 
     // Extract all events from the page - look for event links and their associated data
     const events = await page.evaluate(() => {
