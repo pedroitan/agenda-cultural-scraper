@@ -17,6 +17,31 @@ function envNumber(name: string, fallback: number) {
   return Number.isFinite(n) ? n : fallback
 }
 
+// Parse Brazilian date format like "Sábado, 17 de Jan às 14:30" or "17 de Janeiro de 2026"
+function parseBrazilianDate(dateStr: string): string | null {
+  const months: Record<string, string> = {
+    jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06',
+    jul: '07', ago: '08', set: '09', out: '10', nov: '11', dez: '12',
+    janeiro: '01', fevereiro: '02', março: '03', abril: '04', maio: '05', junho: '06',
+    julho: '07', agosto: '08', setembro: '09', outubro: '10', novembro: '11', dezembro: '12',
+  }
+  
+  // Pattern: "17 de Jan às 14:30" or "Sábado, 17 de Jan às 14:30"
+  const match = dateStr.match(/(\d{1,2})\s+de\s+(\w+)(?:\s+de\s+(\d{4}))?\s*(?:às?\s*(\d{1,2}):(\d{2}))?/i)
+  if (!match) return null
+  
+  const day = match[1].padStart(2, '0')
+  const monthKey = match[2].toLowerCase().slice(0, 3)
+  const month = months[monthKey]
+  if (!month) return null
+  
+  const year = match[3] || new Date().getFullYear().toString()
+  const hour = match[4] ? match[4].padStart(2, '0') : '19'
+  const minute = match[5] || '00'
+  
+  return `${year}-${month}-${day}T${hour}:${minute}:00`
+}
+
 async function fetchHtmlWithRetry(url: string, headers: Record<string, string>) {
   const timeoutMs = envNumber('REQUEST_TIMEOUT_MS', 15000)
   const retryMax = envNumber('RETRY_MAX', 3)
@@ -243,25 +268,54 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
     }
   }
   
-  // Also extract from HTML patterns (event cards with CSS classes)
-  // Pattern: <h3 class="pn67h1e">TITLE</h3> followed by <p class="pn67h1g">VENUE</p>
-  const cardPattern = /<a[^>]*href="([^"]*(?:evento|event)[^"]*)"[^>]*>[\s\S]*?<h3[^>]*>([^<]+)<\/h3>[\s\S]*?<p[^>]*>([^<]*)<\/p>/gi
+  // Extract from HTML patterns using Sympla's CSS classes
+  // Date: <div class="qtfy415...">Sábado, 17 de Jan às 14:30</div>
+  // Title: <h3 class="pn67h1e">TITLE</h3>
+  // Venue: <p class="pn67h1g">VENUE</p>
+  
+  // Find all event card links with their content
+  const cardPattern = /<a[^>]*href="([^"]*(?:\/evento\/|\/event\/)[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
   let match
   while ((match = cardPattern.exec(html)) !== null) {
-    const [, url, title, venue] = match
-    if (url && title && !title.includes('Sympla')) {
+    const [, url, cardContent] = match
+    if (!url) continue
+    
+    // Extract title from h3
+    const titleMatch = cardContent.match(/<h3[^>]*>([^<]+)<\/h3>/i)
+    const title = titleMatch ? titleMatch[1].trim() : null
+    
+    // Extract venue from p tag
+    const venueMatch = cardContent.match(/<p[^>]*class="[^"]*pn67h1g[^"]*"[^>]*>([^<]+)<\/p>/i) ||
+                       cardContent.match(/<p[^>]*>([^<]*Salvador[^<]*)<\/p>/i)
+    const venue = venueMatch ? venueMatch[1].trim() : undefined
+    
+    // Extract date from div with qtfy classes
+    const dateMatch = cardContent.match(/<div[^>]*class="[^"]*qtfy[^"]*"[^>]*>([^<]+)<\/div>/i) ||
+                      cardContent.match(/(\w+,\s*\d{1,2}\s+de\s+\w+\s+às?\s*\d{1,2}:\d{2})/i)
+    const dateStr = dateMatch ? dateMatch[1].trim() : null
+    
+    if (title && !title.includes('Sympla')) {
       const idMatch = url.match(/(\d+)(?:\?|$)/)
       if (idMatch) {
+        // Parse date string like "Sábado, 17 de Jan às 14:30"
+        let startDatetime: string
+        if (dateStr) {
+          const parsed = parseBrazilianDate(dateStr)
+          startDatetime = parsed || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+        } else {
+          startDatetime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+        }
+        
         events.push({
           source: input.source,
           external_id: idMatch[1],
-          title: title.trim(),
-          start_datetime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          title,
+          start_datetime: startDatetime,
           city: input.city,
-          venue_name: venue?.trim() || undefined,
+          venue_name: venue,
           is_free: false,
           url: url.startsWith('http') ? url : `https://www.sympla.com.br${url}`,
-          raw_payload: { title, venue, url },
+          raw_payload: { title, venue, dateStr, url },
         })
       }
     }
