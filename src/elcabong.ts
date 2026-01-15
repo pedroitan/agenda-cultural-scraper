@@ -58,26 +58,31 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     await page.waitForTimeout(2000)
 
     // Click "Load more events" button until no more events load
-    // Using the exact selector from working scraper: #load_more_events.load_more_events
     let loadMoreAttempts = 0
     const maxAttempts = 50
-    const loadMoreSelector = '#load_more_events.load_more_events'
 
     while (loadMoreAttempts < maxAttempts) {
       try {
-        // Wait for the button to be visible
-        const button = page.locator(loadMoreSelector)
-        await button.waitFor({ state: 'visible', timeout: 5000 })
+        // Try to click the button using JavaScript (more reliable)
+        const buttonExists = await page.evaluate(() => {
+          const btn = document.querySelector('#load_more_events') as HTMLElement
+          return btn !== null
+        })
+        
+        if (!buttonExists) {
+          console.log('  Load more button not found in DOM')
+          break
+        }
 
         // Get current event count using the exact selector from working scraper
         const prevEventCount = await page.locator('.wpem-event-box-col').count()
         console.log(`  Current events: ${prevEventCount}, clicking Load more (attempt ${loadMoreAttempts + 1})`)
 
         // Click the button
-        await page.evaluate((selector) => {
-          const btn = document.querySelector(selector) as HTMLElement
+        await page.evaluate(() => {
+          const btn = document.querySelector('#load_more_events') as HTMLElement
           btn?.click()
-        }, loadMoreSelector)
+        })
 
         // Wait for new events to load
         await page.waitForTimeout(1500)
