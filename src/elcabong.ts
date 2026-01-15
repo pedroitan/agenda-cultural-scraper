@@ -44,8 +44,14 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     })
     console.log('Page loaded')
 
-    // Wait for page to fully render
-    await page.waitForTimeout(5000)
+    // Wait for event elements to appear
+    try {
+      await page.waitForSelector('.wpem-event-box-col', { timeout: 15000 })
+      console.log('  Event elements found')
+    } catch {
+      console.log('  No event elements found, waiting longer...')
+      await page.waitForTimeout(5000)
+    }
 
     // Scroll to bottom to ensure button is visible
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
