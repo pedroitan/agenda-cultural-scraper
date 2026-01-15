@@ -30,123 +30,110 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
 
   console.log('Scraping El Cabong agenda with Playwright...')
 
-  const browser = await chromium.launch({ headless: true })
+  const browser = await chromium.launch({ 
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  })
   const page = await browser.newPage()
 
   try {
-    await page.goto('https://elcabong.com.br/agenda/', { waitUntil: 'domcontentloaded', timeout: 30000 })
+    // Use networkidle2 like the working scraper
+    await page.goto('https://elcabong.com.br/agenda/', { 
+      waitUntil: 'networkidle',
+      timeout: 60000 
+    })
     console.log('Page loaded')
 
-    // Wait for initial content
-    await page.waitForTimeout(3000)
-
-    // Debug: log page content
-    const pageTitle = await page.title()
-    console.log(`  Page title: ${pageTitle}`)
+    // Scroll to bottom to ensure button is visible
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    await page.waitForTimeout(2000)
 
     // Click "Load more events" button until no more events load
-    let clickCount = 0
-    const maxClicks = 100
-    let previousEventCount = 0
+    // Using the exact selector from working scraper: #load_more_events.load_more_events
+    let loadMoreAttempts = 0
+    const maxAttempts = 50
+    const loadMoreSelector = '#load_more_events.load_more_events'
 
-    // Initial event count
-    const initialCount = await page.locator('a[href*="/event/"]').count()
-    console.log(`  Initial events on page: ${initialCount}`)
+    while (loadMoreAttempts < maxAttempts) {
+      try {
+        // Wait for the button to be visible
+        const button = page.locator(loadMoreSelector)
+        await button.waitFor({ state: 'visible', timeout: 5000 })
 
-    while (clickCount < maxClicks) {
-      // First scroll to bottom to ensure button is visible
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-      await page.waitForTimeout(1000)
+        // Get current event count using the exact selector from working scraper
+        const prevEventCount = await page.locator('.wpem-event-box-col').count()
+        console.log(`  Current events: ${prevEventCount}, clicking Load more (attempt ${loadMoreAttempts + 1})`)
 
-      // Try to find and click the load more button using JavaScript
-      const clicked = await page.evaluate(() => {
-        const btn = document.querySelector('#load_more_events') as HTMLElement
-        if (btn) {
-          // Log button state for debugging
-          console.log('Button found:', btn.tagName, 'display:', getComputedStyle(btn).display, 'visibility:', getComputedStyle(btn).visibility)
-          // Click regardless of visibility - the site may use CSS to show/hide
-          btn.click()
-          return true
+        // Click the button
+        await page.evaluate((selector) => {
+          const btn = document.querySelector(selector) as HTMLElement
+          btn?.click()
+        }, loadMoreSelector)
+
+        // Wait for new events to load
+        await page.waitForTimeout(1500)
+        
+        // Wait for event count to increase
+        try {
+          await page.waitForFunction(
+            (prevCount: number) => document.querySelectorAll('.wpem-event-box-col').length > prevCount,
+            prevEventCount,
+            { timeout: 10000 }
+          )
+        } catch {
+          // No new events loaded
+          console.log('  No new events loaded, stopping')
+          break
         }
-        console.log('Button not found')
-        return false
-      })
 
-      if (!clicked) {
+        loadMoreAttempts++
+      } catch {
+        // Button not found or not visible
         console.log('  Load more button not found or not visible, stopping')
         break
       }
-
-      console.log(`  Clicked Load more (${clickCount + 1})`)
-      
-      // Wait for AJAX to complete
-      await page.waitForTimeout(2000)
-      
-      // Scroll to bottom again to load lazy content
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-      await page.waitForTimeout(1500)
-      clickCount++
-      
-      // Check if new events were loaded
-      const newEventCount = await page.locator('a[href*="/event/"]').count()
-      console.log(`  Events on page: ${newEventCount}`)
-      
-      if (newEventCount === previousEventCount && clickCount > 3) {
-        console.log(`  No new events loaded (still ${newEventCount}), stopping`)
-        break
-      }
-      previousEventCount = newEventCount
     }
 
-    const finalCount = await page.locator('a[href*="/event/"]').count()
-    console.log(`  Clicked ${clickCount} times, final events: ${finalCount}`)
+    if (loadMoreAttempts === maxAttempts) {
+      console.log('  Reached maximum load more attempts')
+    }
 
-    // Extract all events from the page - look for event links and their associated data
+    const finalCount = await page.locator('.wpem-event-box-col').count()
+    console.log(`  Clicked ${loadMoreAttempts} times, final events: ${finalCount}`)
+
+    // Extract all events using the exact selectors from working scraper
     const events = await page.evaluate(() => {
       const results: Array<{
         title: string | null
-        dateStr: string | null
+        date: string | null
+        time: string | null
         location: string | null
         url: string | null
         imageUrl: string | null
       }> = []
 
-      // Find all event links (format: /event/event-name/)
-      const eventLinks = document.querySelectorAll('a[href*="/event/"]')
-      const seenUrls = new Set<string>()
+      const eventElements = document.querySelectorAll('.wpem-event-box-col')
 
-      eventLinks.forEach((link) => {
-        const url = link.getAttribute('href')
-        if (!url || seenUrls.has(url)) return
-        seenUrls.add(url)
+      eventElements.forEach(event => {
+        const title = (event.querySelector('.wpem-event-title') as HTMLElement)?.textContent?.trim() || null
+        const datetime = (event.querySelector('.wpem-event-date-time') as HTMLElement)?.textContent?.trim() || null
+        const [date, time] = datetime ? datetime.split(' - ') : [null, null]
+        const location = (event.querySelector('.wpem-event-location') as HTMLElement)?.textContent?.trim() || null
+        const link = (event.querySelector('a.wpem-event-action-url') as HTMLAnchorElement)?.href || null
+        const bannerImg = event.querySelector('.wpem-event-banner-img') as HTMLElement
+        const imageUrl = bannerImg?.style?.backgroundImage
+          ?.replace(/url\(["']?/, '')
+          ?.replace(/["']?\)$/, '') || null
 
-        // Find the parent container that has the event info
-        const container = link.closest('.wpem-event-box-col') || 
-                         link.closest('.wpem-event-action-url')?.parentElement?.parentElement ||
-                         link.parentElement?.parentElement
-
-        if (!container) return
-
-        // Try to extract title from h3 or link text
-        const titleEl = container.querySelector('.wpem-heading-text') || 
-                       container.querySelector('h3') ||
-                       link
-        const title = titleEl?.textContent?.trim() || null
-
-        // Extract date
-        const dateEl = container.querySelector('.wpem-event-date-time-text')
-        const dateStr = dateEl?.textContent?.replace(/\s+/g, ' ').trim() || null
-
-        // Extract location
-        const locationEl = container.querySelector('.wpem-event-location-text')
-        const location = locationEl?.textContent?.replace(/\s+/g, ' ').trim() || null
-
-        // Extract image
-        const imgEl = container.querySelector('img')
-        const imageUrl = imgEl?.getAttribute('src') || null
-
-        if (title && title.length > 3) {
-          results.push({ title, dateStr, location, url, imageUrl })
+        if (title && date && location && link) {
+          results.push({
+            title,
+            date: date?.trim() || null,
+            time: time?.trim() || null,
+            location,
+            url: link,
+            imageUrl
+          })
         }
       })
 
@@ -156,15 +143,17 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     console.log(`  Found ${events.length} events on page`)
 
     for (const ev of events) {
-      if (!ev.title || !ev.dateStr) continue
+      if (!ev.title || !ev.date) continue
 
-      const startDatetime = parseElCabongDate(ev.dateStr)
+      // Combine date and time for parsing
+      const dateTimeStr = ev.time ? `${ev.date} - ${ev.time}` : ev.date
+      const startDatetime = parseElCabongDate(dateTimeStr)
       if (!startDatetime) {
         invalid_count++
         continue
       }
 
-      const externalId = `elcabong-${Buffer.from(ev.title + ev.dateStr).toString('base64').slice(0, 20)}`
+      const externalId = `elcabong-${Buffer.from(ev.title + ev.date).toString('base64').slice(0, 20)}`
 
       if (seenIds.has(externalId)) continue
       seenIds.add(externalId)
