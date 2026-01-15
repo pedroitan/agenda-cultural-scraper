@@ -78,11 +78,28 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         const prevEventCount = await page.locator('.wpem-event-box-col').count()
         console.log(`  Current events: ${prevEventCount}, clicking Load more (attempt ${loadMoreAttempts + 1})`)
 
-        // Click the button
-        await page.evaluate(() => {
-          const btn = document.querySelector('#load_more_events') as HTMLElement
-          btn?.click()
+        // Click the button - try multiple approaches
+        const clicked = await page.evaluate(() => {
+          const btn = document.querySelector('#load_more_events') as HTMLAnchorElement
+          if (!btn) return false
+          
+          // Log button state
+          console.log('Button display:', getComputedStyle(btn).display)
+          console.log('Button href:', btn.href)
+          
+          // Try clicking
+          btn.click()
+          
+          // Also try dispatching click event
+          btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+          
+          return true
         })
+        
+        if (!clicked) {
+          console.log('  Failed to click button')
+          break
+        }
 
         // Wait for new events to load
         await page.waitForTimeout(1500)
