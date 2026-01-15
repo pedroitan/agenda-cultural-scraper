@@ -61,10 +61,14 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
       // Try to find and click the load more button using JavaScript
       const clicked = await page.evaluate(() => {
         const btn = document.querySelector('#load_more_events') as HTMLElement
-        if (btn && btn.offsetParent !== null) { // Check if visible
+        if (btn) {
+          // Log button state for debugging
+          console.log('Button found:', btn.tagName, 'display:', getComputedStyle(btn).display, 'visibility:', getComputedStyle(btn).visibility)
+          // Click regardless of visibility - the site may use CSS to show/hide
           btn.click()
           return true
         }
+        console.log('Button not found')
         return false
       })
 
