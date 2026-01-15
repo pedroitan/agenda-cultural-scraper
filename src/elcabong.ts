@@ -34,7 +34,7 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
   const page = await browser.newPage()
 
   try {
-    await page.goto('https://elcabong.com.br/agenda/', { waitUntil: 'networkidle', timeout: 60000 })
+    await page.goto('https://elcabong.com.br/agenda/', { waitUntil: 'domcontentloaded', timeout: 30000 })
     console.log('Page loaded')
 
     // Wait for initial content
