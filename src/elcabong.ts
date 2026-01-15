@@ -42,12 +42,16 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     const maxClicks = 50
 
     while (clickCount < maxClicks) {
-      const loadMoreButton = page.locator('text=Load more events').first()
+      // Try multiple selectors for the load more button
+      const loadMoreButton = page.locator('button:has-text("Load more"), a:has-text("Load more"), .load_more_events, [class*="load-more"], strong:has-text("Load more")').first()
       
-      if (await loadMoreButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const isVisible = await loadMoreButton.isVisible({ timeout: 3000 }).catch(() => false)
+      console.log(`  Button visible: ${isVisible}`)
+      
+      if (isVisible) {
         console.log(`  Clicking "Load more events" (${clickCount + 1})...`)
         await loadMoreButton.click()
-        await page.waitForTimeout(1500) // Wait for content to load
+        await page.waitForTimeout(2000) // Wait for content to load
         clickCount++
       } else {
         console.log('  No more "Load more events" button found')
