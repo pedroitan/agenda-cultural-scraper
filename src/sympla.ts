@@ -290,10 +290,38 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
                        cardContent.match(/<p[^>]*>([^<]*Salvador[^<]*)<\/p>/i)
     const venue = venueMatch ? venueMatch[1].trim() : undefined
     
-    // Extract image URL from img tag
-    const imgMatch = cardContent.match(/<img[^>]*src="([^"]+)"[^>]*>/i) ||
-                     cardContent.match(/style="[^"]*background-image:\s*url\(['"]?([^'")\s]+)['"]?\)/i)
-    let imageUrl = imgMatch ? imgMatch[1] : undefined
+    // Extract image URL from img tag - Sympla uses srcset with encoded URLs
+    // Try to get from srcset first (better quality), then src
+    let imageUrl: string | undefined = undefined
+    
+    // Pattern 1: Extract from srcset - get the URL inside the _next/image wrapper
+    const srcsetMatch = cardContent.match(/srcset="[^"]*url=([^&"]+)/i)
+    if (srcsetMatch) {
+      // URL is encoded, decode it
+      imageUrl = decodeURIComponent(srcsetMatch[1])
+    }
+    
+    // Pattern 2: Extract from src attribute
+    if (!imageUrl) {
+      const srcMatch = cardContent.match(/<img[^>]*src="([^"]+)"[^>]*>/i)
+      if (srcMatch) {
+        const srcUrl = srcMatch[1]
+        // Check if it's a _next/image URL with encoded original
+        const urlParam = srcUrl.match(/url=([^&]+)/)
+        if (urlParam) {
+          imageUrl = decodeURIComponent(urlParam[1])
+        } else {
+          imageUrl = srcUrl
+        }
+      }
+    }
+    
+    // Pattern 3: Try to find direct asset URL
+    if (!imageUrl) {
+      const assetMatch = cardContent.match(/(https:\/\/assets\.bileto\.sympla\.com\.br[^"'\s]+)/i)
+      imageUrl = assetMatch ? assetMatch[1] : undefined
+    }
+    
     // Clean up image URL if needed
     if (imageUrl && !imageUrl.startsWith('http')) {
       imageUrl = imageUrl.startsWith('//') ? `https:${imageUrl}` : `https://www.sympla.com.br${imageUrl}`
