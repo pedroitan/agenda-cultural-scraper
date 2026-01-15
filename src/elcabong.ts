@@ -37,12 +37,15 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
   const page = await browser.newPage()
 
   try {
-    // Use networkidle2 like the working scraper
+    // Use domcontentloaded to avoid timeout in CI, then wait for content
     await page.goto('https://elcabong.com.br/agenda/', { 
-      waitUntil: 'networkidle',
-      timeout: 60000 
+      waitUntil: 'domcontentloaded',
+      timeout: 30000 
     })
     console.log('Page loaded')
+
+    // Wait for page to fully render
+    await page.waitForTimeout(5000)
 
     // Scroll to bottom to ensure button is visible
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
