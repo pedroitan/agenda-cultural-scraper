@@ -69,9 +69,9 @@ async function main() {
   const env = EnvSchema.parse(process.env)
   const city = env.SCRAPE_CITY
 
-  // Run all scrapers (temporarily only El Cabong for debugging)
+  // Run all scrapers
   const scrapers = [
-    // { name: 'sympla', run: runSymplaScrape },
+    { name: 'sympla', run: runSymplaScrape },
     { name: 'elcabong', run: runElCabongScrape },
   ]
 
