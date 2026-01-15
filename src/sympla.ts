@@ -240,11 +240,13 @@ function findEventsInObject(obj: any, events: any[] = []): any[] {
 }
 
 export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrapeResult> {
-  const requestDelayMs = envNumber('REQUEST_DELAY_MS', 1000)
+  const requestDelayMs = envNumber('REQUEST_DELAY_MS', 800)
+  const maxEventsTarget = envNumber('MAX_EVENTS', 100)
 
   const valid: EventInput[] = []
   let invalid_count = 0
   let items_fetched = 0
+  const collectedLinks = new Set<string>()
 
   const headers: Record<string, string> = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -252,77 +254,118 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
     'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
   }
 
-  // Scrape the main events page for Salvador
-  const categories = ['show-musica-festa', 'teatro-espetaculos', 'gastronomia', 'cursos-workshops']
-  
+  // Extended categories to get more events
+  const categories = [
+    'show-musica-festa',
+    'teatro-espetaculos', 
+    'gastronomia',
+    'cursos-workshops',
+    'congressos-palestras',
+    'esportes',
+    'infantil',
+    'religiao-espiritualidade',
+    'passeios-tours',
+    '', // All events (no category filter)
+  ]
+
+  console.log(`Target: ${maxEventsTarget} events`)
+
+  // Phase 1: Collect all event links from category pages
   for (const category of categories) {
-    const url = `https://www.sympla.com.br/eventos/salvador-ba/${category}`
-    console.log(`Fetching: ${url}`)
+    if (collectedLinks.size >= maxEventsTarget * 2) break // Collect extra to account for duplicates
     
-    try {
-      const html = await fetchHtmlWithRetry(url, headers)
+    const baseUrl = category 
+      ? `https://www.sympla.com.br/eventos/salvador-ba/${category}`
+      : `https://www.sympla.com.br/eventos/salvador-ba`
+    
+    // Try multiple pages per category
+    for (let page = 1; page <= 5; page++) {
+      if (collectedLinks.size >= maxEventsTarget * 2) break
       
-      // Try to extract __NEXT_DATA__
-      const nextData = extractNextData(html)
-      if (nextData) {
-        const events = findEventsInObject(nextData)
-        console.log(`Found ${events.length} events in __NEXT_DATA__ for ${category}`)
-        items_fetched += events.length
+      const url = page === 1 ? baseUrl : `${baseUrl}?page=${page}`
+      console.log(`Fetching listing: ${url}`)
+      
+      try {
+        const html = await fetchHtmlWithRetry(url, headers)
         
-        for (const item of events) {
-          const e = normalizeEvent(item, input)
-          if (!e) {
-            invalid_count++
-            continue
-          }
-          valid.push(e)
-        }
-      } else {
-        // Fallback: extract event links from HTML using regex
-        const eventLinks = html.match(/href="(https:\/\/(?:www\.sympla\.com\.br\/evento\/[^"]+|bileto\.sympla\.com\.br\/event\/[^"]+))"/g) || []
-        const uniqueLinks = [...new Set(eventLinks.map(l => l.replace(/href="|"/g, '')))]
-        console.log(`Found ${uniqueLinks.length} event links in HTML for ${category}`)
+        // Extract all event links from the page
+        const symplaLinks = html.match(/href="(https:\/\/www\.sympla\.com\.br\/evento\/[^"]+)"/g) || []
+        const biletoLinks = html.match(/href="(https:\/\/bileto\.sympla\.com\.br\/event\/[^"]+)"/g) || []
         
-        // Fetch details for each event
-        for (const link of uniqueLinks) {
-          const idMatch = link.match(/\/evento\/[^/]+-(\d+)$/) || link.match(/\/event\/(\d+)/)
-          if (!idMatch) continue
-          
-          const eventId = idMatch[1]
-          items_fetched++
-          
-          try {
-            console.log(`Fetching event details: ${link}`)
-            const eventHtml = await fetchHtmlWithRetry(link, headers)
-            const eventData = extractEventFromHtml(eventHtml, eventId, link, input)
-            
-            if (eventData) {
-              valid.push(eventData)
-            } else {
-              invalid_count++
-            }
-            
-            await delay(500) // Small delay between event fetches
-          } catch (err) {
-            console.error(`Error fetching event ${eventId}:`, err)
-            invalid_count++
-          }
-        }
+        const allLinks = [...symplaLinks, ...biletoLinks]
+          .map(l => l.replace(/href="|"/g, ''))
+          .filter(l => !l.includes('?') || l.includes('event')) // Filter out query params except event pages
+        
+        const newLinks = allLinks.filter(l => !collectedLinks.has(l))
+        newLinks.forEach(l => collectedLinks.add(l))
+        
+        console.log(`  Found ${newLinks.length} new links (total: ${collectedLinks.size})`)
+        
+        // If no new links found, move to next category
+        if (newLinks.length === 0) break
+        
+        await delay(requestDelayMs)
+      } catch (err) {
+        console.error(`Error fetching ${url}:`, err)
+        break
       }
-    } catch (err) {
-      console.error(`Error fetching ${category}:`, err)
     }
-    
-    await delay(requestDelayMs)
   }
 
-  // Deduplicate by external_id
+  console.log(`\nCollected ${collectedLinks.size} unique event links. Fetching details...`)
+
+  // Phase 2: Fetch details for each event (limit to target)
+  const linksToFetch = Array.from(collectedLinks).slice(0, maxEventsTarget + 20) // Extra buffer
+  
+  for (const link of linksToFetch) {
+    if (valid.length >= maxEventsTarget) {
+      console.log(`Reached target of ${maxEventsTarget} valid events`)
+      break
+    }
+    
+    // Extract event ID from URL
+    const idMatch = link.match(/\/evento\/[^/]*-(\d+)(?:\?|$)/) || 
+                    link.match(/\/evento\/(\d+)/) ||
+                    link.match(/\/event\/(\d+)/)
+    if (!idMatch) {
+      console.log(`Could not extract ID from: ${link}`)
+      invalid_count++
+      continue
+    }
+    
+    const eventId = idMatch[1]
+    items_fetched++
+    
+    try {
+      console.log(`[${valid.length + 1}/${maxEventsTarget}] Fetching: ${link}`)
+      const eventHtml = await fetchHtmlWithRetry(link, headers)
+      const eventData = extractEventFromHtml(eventHtml, eventId, link, input)
+      
+      if (eventData && eventData.title && !eventData.title.includes('Sympla - Ingressos')) {
+        // Validate we have real data, not generic page title
+        valid.push(eventData)
+        console.log(`  ✓ ${eventData.title.slice(0, 50)}...`)
+      } else {
+        console.log(`  ✗ Invalid or generic data`)
+        invalid_count++
+      }
+      
+      await delay(300) // Faster delay for individual pages
+    } catch (err) {
+      console.error(`  ✗ Error: ${err}`)
+      invalid_count++
+    }
+  }
+
+  // Deduplicate by external_id (in case of duplicates)
   const seen = new Set<string>()
   const dedupedValid = valid.filter(e => {
     if (seen.has(e.external_id)) return false
     seen.add(e.external_id)
     return true
   })
+
+  console.log(`\nScrape complete: ${dedupedValid.length} valid, ${invalid_count} invalid, ${items_fetched} fetched`)
 
   return { valid: dedupedValid, invalid_count, items_fetched }
 }
