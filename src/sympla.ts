@@ -123,12 +123,22 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
   }
 
   for (let page = 1; page <= maxPages; page++) {
-    const url = `https://www.sympla.com.br/api/v1/events?city=Salvador&page=${page}`
+    // Sympla search API endpoint (used by their frontend)
+    const url = `https://www.sympla.com.br/api/v4/search?city=salvador&page=${page}&size=20&order_by=date`
 
     const json = await fetchJsonWithRetry(url, { headers })
 
-    const items = Array.isArray((json as any)?.data) ? (json as any).data : Array.isArray(json) ? json : null
+    // v4 API returns { data: { events: [...] } } or { events: [...] } or { data: [...] }
+    const jsonAny = json as any
+    const items = 
+      Array.isArray(jsonAny?.data?.events) ? jsonAny.data.events :
+      Array.isArray(jsonAny?.events) ? jsonAny.events :
+      Array.isArray(jsonAny?.data) ? jsonAny.data :
+      Array.isArray(jsonAny) ? jsonAny :
+      null
+    
     if (!items) {
+      console.log('API response structure:', JSON.stringify(json).slice(0, 500))
       throw new Error('Unexpected response shape from Sympla API')
     }
 
