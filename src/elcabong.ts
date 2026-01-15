@@ -37,22 +37,42 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     await page.goto('https://elcabong.com.br/agenda/', { waitUntil: 'networkidle' })
     console.log('Page loaded')
 
-    // Click "Load more events" button until it disappears or max clicks reached
+    // Click "Load more events" button until no more events load
     let clickCount = 0
     const maxClicks = 50
+    let previousEventCount = 0
 
     while (clickCount < maxClicks) {
-      // Try multiple selectors for the load more button
-      const loadMoreButton = page.locator('button:has-text("Load more"), a:has-text("Load more"), .load_more_events, [class*="load-more"], strong:has-text("Load more")').first()
-      
-      const isVisible = await loadMoreButton.isVisible({ timeout: 3000 }).catch(() => false)
-      console.log(`  Button visible: ${isVisible}`)
-      
-      if (isVisible) {
-        console.log(`  Clicking "Load more events" (${clickCount + 1})...`)
-        await loadMoreButton.click()
-        await page.waitForTimeout(2000) // Wait for content to load
+      // Count current events
+      const currentEventCount = await page.locator('a[href*="/event/"]').count()
+      console.log(`  Current events on page: ${currentEventCount}`)
+
+      // Try to click load more using JavaScript
+      const clicked = await page.evaluate(() => {
+        // Find the load more button/link
+        const buttons = Array.from(document.querySelectorAll('a, button, div, span, strong'))
+        for (const btn of buttons) {
+          const text = btn.textContent?.toLowerCase() || ''
+          if (text.includes('load more') || text.includes('carregar mais')) {
+            (btn as HTMLElement).click()
+            return true
+          }
+        }
+        return false
+      })
+
+      if (clicked) {
+        console.log(`  Clicked "Load more events" (${clickCount + 1})`)
+        await page.waitForTimeout(2500) // Wait for content to load
         clickCount++
+        
+        // Check if new events were loaded
+        const newEventCount = await page.locator('a[href*="/event/"]').count()
+        if (newEventCount === previousEventCount) {
+          console.log('  No new events loaded, stopping')
+          break
+        }
+        previousEventCount = newEventCount
       } else {
         console.log('  No more "Load more events" button found')
         break
