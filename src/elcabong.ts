@@ -62,67 +62,46 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     const maxAttempts = 50
 
     while (loadMoreAttempts < maxAttempts) {
-      try {
-        // Try to click the button using JavaScript (more reliable)
-        const buttonExists = await page.evaluate(() => {
-          const btn = document.querySelector('#load_more_events') as HTMLElement
-          return btn !== null
-        })
-        
-        if (!buttonExists) {
-          console.log('  Load more button not found in DOM')
-          break
-        }
-
-        // Get current event count using the exact selector from working scraper
-        const prevEventCount = await page.locator('.wpem-event-box-col').count()
-        console.log(`  Current events: ${prevEventCount}, clicking Load more (attempt ${loadMoreAttempts + 1})`)
-
-        // Click the button - try multiple approaches
-        const clicked = await page.evaluate(() => {
-          const btn = document.querySelector('#load_more_events') as HTMLAnchorElement
-          if (!btn) return false
-          
-          // Log button state
-          console.log('Button display:', getComputedStyle(btn).display)
-          console.log('Button href:', btn.href)
-          
-          // Try clicking
-          btn.click()
-          
-          // Also try dispatching click event
-          btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-          
-          return true
-        })
-        
-        if (!clicked) {
-          console.log('  Failed to click button')
-          break
-        }
-
-        // Wait for new events to load
-        await page.waitForTimeout(1500)
-        
-        // Wait for event count to increase
-        try {
-          await page.waitForFunction(
-            (prevCount: number) => document.querySelectorAll('.wpem-event-box-col').length > prevCount,
-            prevEventCount,
-            { timeout: 10000 }
-          )
-        } catch {
-          // No new events loaded
-          console.log('  No new events loaded, stopping')
-          break
-        }
-
-        loadMoreAttempts++
-      } catch {
-        // Button not found or not visible
-        console.log('  Load more button not found or not visible, stopping')
+      // Get current event count
+      const prevEventCount = await page.locator('.wpem-event-box-col').count()
+      
+      // Try to find and click the button using Playwright's click
+      const button = page.locator('#load_more_events')
+      const buttonCount = await button.count()
+      
+      if (buttonCount === 0) {
+        console.log('  Load more button not found in DOM')
         break
       }
+
+      // Check if button is visible
+      const isVisible = await button.isVisible().catch(() => false)
+      console.log(`  Current events: ${prevEventCount}, button visible: ${isVisible}, clicking (attempt ${loadMoreAttempts + 1})`)
+
+      // Use Playwright's click which handles scrolling and waiting
+      try {
+        await button.click({ timeout: 5000 })
+      } catch (e) {
+        console.log('  Playwright click failed, trying JS click')
+        await page.evaluate(() => {
+          const btn = document.querySelector('#load_more_events') as HTMLElement
+          btn?.click()
+        })
+      }
+
+      // Wait for AJAX
+      await page.waitForTimeout(2000)
+      
+      // Wait for event count to increase
+      const newEventCount = await page.locator('.wpem-event-box-col').count()
+      console.log(`  Events after click: ${newEventCount}`)
+      
+      if (newEventCount <= prevEventCount) {
+        console.log('  No new events loaded, stopping')
+        break
+      }
+
+      loadMoreAttempts++
     }
 
     if (loadMoreAttempts === maxAttempts) {
