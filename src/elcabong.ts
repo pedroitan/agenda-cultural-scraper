@@ -57,9 +57,8 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
 
     console.log(`  Clicked ${clickCount} times, now extracting events...`)
 
-    // Extract all events from the page
+    // Extract all events from the page - look for event links and their associated data
     const events = await page.evaluate(() => {
-      const eventElements = document.querySelectorAll('.wpem-event-box-col, .wpem-event-listings article, [class*="wpem-event"]')
       const results: Array<{
         title: string | null
         dateStr: string | null
@@ -68,20 +67,41 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         imageUrl: string | null
       }> = []
 
-      eventElements.forEach((el) => {
-        const titleEl = el.querySelector('.wpem-heading-text, h3')
-        const dateEl = el.querySelector('.wpem-event-date-time-text')
-        const locationEl = el.querySelector('.wpem-event-location-text')
-        const linkEl = el.querySelector('a[href*="evento"], a[href]')
-        const imgEl = el.querySelector('img')
+      // Find all event links (format: /event/event-name/)
+      const eventLinks = document.querySelectorAll('a[href*="/event/"]')
+      const seenUrls = new Set<string>()
 
+      eventLinks.forEach((link) => {
+        const url = link.getAttribute('href')
+        if (!url || seenUrls.has(url)) return
+        seenUrls.add(url)
+
+        // Find the parent container that has the event info
+        const container = link.closest('.wpem-event-box-col') || 
+                         link.closest('.wpem-event-action-url')?.parentElement?.parentElement ||
+                         link.parentElement?.parentElement
+
+        if (!container) return
+
+        // Try to extract title from h3 or link text
+        const titleEl = container.querySelector('.wpem-heading-text') || 
+                       container.querySelector('h3') ||
+                       link
         const title = titleEl?.textContent?.trim() || null
+
+        // Extract date
+        const dateEl = container.querySelector('.wpem-event-date-time-text')
         const dateStr = dateEl?.textContent?.replace(/\s+/g, ' ').trim() || null
+
+        // Extract location
+        const locationEl = container.querySelector('.wpem-event-location-text')
         const location = locationEl?.textContent?.replace(/\s+/g, ' ').trim() || null
-        const url = linkEl?.getAttribute('href') || null
+
+        // Extract image
+        const imgEl = container.querySelector('img')
         const imageUrl = imgEl?.getAttribute('src') || null
 
-        if (title && dateStr) {
+        if (title && title.length > 3) {
           results.push({ title, dateStr, location, url, imageUrl })
         }
       })
