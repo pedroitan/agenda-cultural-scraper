@@ -370,8 +370,7 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
 }
 
 export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrapeResult> {
-  const requestDelayMs = envNumber('REQUEST_DELAY_MS', 1000)
-  const maxEventsTarget = envNumber('MAX_EVENTS', 100)
+  const requestDelayMs = envNumber('REQUEST_DELAY_MS', 800)
 
   const valid: EventInput[] = []
   let invalid_count = 0
@@ -401,7 +400,7 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
     'gratis',
   ]
 
-  console.log(`Target: ${maxEventsTarget} events`)
+  console.log(`Scraping ALL events from Salvador...`)
 
   // Category names in Portuguese
   const categoryNames: Record<string, string> = {
