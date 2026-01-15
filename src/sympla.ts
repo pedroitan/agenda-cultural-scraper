@@ -1,34 +1,4 @@
-import { z } from 'zod'
-
 import type { EventInput, ScraperInput } from './types.js'
-
-// Schema for Sympla's __NEXT_DATA__ JSON embedded in HTML
-const SymplaItemSchema = z
-  .object({
-    id: z.union([z.string(), z.number()]).transform(String).optional(),
-    name: z.string().optional(),
-    title: z.string().optional(), // alternative field name
-    start_date: z.string().optional(),
-    startDate: z.string().optional(), // alternative field name
-    url: z.string().optional(),
-    link: z.string().optional(), // alternative field name
-    image: z.string().optional(),
-    imageUrl: z.string().optional(), // alternative field name
-    city: z.string().optional(),
-    location: z.string().optional(), // alternative field name
-    venue: z
-      .object({
-        name: z.string().optional(),
-      })
-      .optional(),
-    venueName: z.string().optional(), // alternative field name
-    min_price: z.number().optional(),
-    minPrice: z.number().optional(), // alternative field name
-    price: z.string().optional(),
-    is_free: z.boolean().optional(),
-    isFree: z.boolean().optional(), // alternative field name
-  })
-  .passthrough()
 
 type SymplaScrapeResult = {
   valid: EventInput[]
@@ -45,49 +15,6 @@ function envNumber(name: string, fallback: number) {
   if (!v) return fallback
   const n = Number(v)
   return Number.isFinite(n) ? n : fallback
-}
-
-function isWithinWindow(startIso: string, untilDays: number) {
-  const start = new Date(startIso)
-  if (Number.isNaN(start.getTime())) return false
-
-  const now = new Date()
-  const until = new Date(now.getTime() + untilDays * 24 * 60 * 60 * 1000)
-
-  return start >= now && start <= until
-}
-
-function normalizeEvent(item: unknown, input: ScraperInput): EventInput | null {
-  const parsed = SymplaItemSchema.safeParse(item)
-  if (!parsed.success) return null
-
-  const data = parsed.data
-  const external_id = data.id
-  const title = data.name
-  const start_datetime = data.start_date
-  const url = data.url
-
-  if (!external_id || !title || !start_datetime || !url) return null
-  if (!isWithinWindow(start_datetime, input.untilDays ?? 90)) return null
-
-  const is_free = Boolean(data.is_free)
-  const min_price = typeof data.min_price === 'number' ? Math.round(data.min_price) : undefined
-  const price_text = data.price ?? (is_free ? 'Gratuito' : 'Consulte')
-
-  return {
-    source: input.source,
-    external_id,
-    title,
-    start_datetime,
-    city: input.city,
-    venue_name: data.venue?.name,
-    image_url: data.image,
-    is_free,
-    min_price,
-    price_text,
-    url,
-    raw_payload: data,
-  }
 }
 
 async function fetchHtmlWithRetry(url: string, headers: Record<string, string>) {
@@ -239,133 +166,218 @@ function findEventsInObject(obj: any, events: any[] = []): any[] {
   return events
 }
 
+async function fetchSymplaSearchApi(city: string, page: number, headers: Record<string, string>): Promise<any[]> {
+  // Try Sympla's internal search API endpoints
+  const apiUrls = [
+    `https://www.sympla.com.br/api/v1/events?city=${city}&page=${page}&limit=50`,
+    `https://api.sympla.com.br/public/v3/events?city=${city}&page=${page}&pageSize=50`,
+    `https://www.sympla.com.br/_next/data/events/${city}.json?page=${page}`,
+  ]
+  
+  for (const apiUrl of apiUrls) {
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      
+      const res = await fetch(apiUrl, {
+        headers: {
+          ...headers,
+          'accept': 'application/json',
+        },
+        signal: controller.signal,
+      })
+      
+      clearTimeout(timeoutId)
+      
+      if (res.ok) {
+        const json = await res.json()
+        const events = json?.data || json?.events || json?.results || (Array.isArray(json) ? json : [])
+        if (events.length > 0) {
+          console.log(`  API ${apiUrl} returned ${events.length} events`)
+          return events
+        }
+      }
+    } catch {
+      // Try next API
+    }
+  }
+  
+  return []
+}
+
+// Extract events directly from listing page HTML using CSS class patterns
+function extractEventsFromListingHtml(html: string, input: ScraperInput): EventInput[] {
+  const events: EventInput[] = []
+  
+  // Try to get events from __NEXT_DATA__ first (most reliable)
+  const nextData = extractNextData(html)
+  if (nextData) {
+    const foundEvents = findEventsInObject(nextData)
+    console.log(`  Found ${foundEvents.length} events in __NEXT_DATA__`)
+    
+    for (const ev of foundEvents) {
+      const id = ev.id || ev.eventId || ev.slug
+      const title = ev.name || ev.title
+      const url = ev.url || ev.link || (id ? `https://www.sympla.com.br/evento/${id}` : null)
+      const startDate = ev.start_date || ev.startDate || ev.date
+      const venue = ev.venue?.name || ev.venueName || ev.location
+      const image = ev.image || ev.imageUrl || ev.banner
+      const isFree = ev.is_free || ev.isFree || ev.free || false
+      const price = ev.price || ev.price_text
+      
+      if (id && title && url) {
+        events.push({
+          source: input.source,
+          external_id: String(id),
+          title,
+          start_datetime: startDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          city: input.city,
+          venue_name: venue,
+          image_url: image,
+          is_free: Boolean(isFree),
+          price_text: price,
+          url,
+          raw_payload: ev,
+        })
+      }
+    }
+  }
+  
+  // Also extract from HTML patterns (event cards with CSS classes)
+  // Pattern: <h3 class="pn67h1e">TITLE</h3> followed by <p class="pn67h1g">VENUE</p>
+  const cardPattern = /<a[^>]*href="([^"]*(?:evento|event)[^"]*)"[^>]*>[\s\S]*?<h3[^>]*>([^<]+)<\/h3>[\s\S]*?<p[^>]*>([^<]*)<\/p>/gi
+  let match
+  while ((match = cardPattern.exec(html)) !== null) {
+    const [, url, title, venue] = match
+    if (url && title && !title.includes('Sympla')) {
+      const idMatch = url.match(/(\d+)(?:\?|$)/)
+      if (idMatch) {
+        events.push({
+          source: input.source,
+          external_id: idMatch[1],
+          title: title.trim(),
+          start_datetime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          city: input.city,
+          venue_name: venue?.trim() || undefined,
+          is_free: false,
+          url: url.startsWith('http') ? url : `https://www.sympla.com.br${url}`,
+          raw_payload: { title, venue, url },
+        })
+      }
+    }
+  }
+  
+  return events
+}
+
 export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrapeResult> {
-  const requestDelayMs = envNumber('REQUEST_DELAY_MS', 800)
+  const requestDelayMs = envNumber('REQUEST_DELAY_MS', 1000)
   const maxEventsTarget = envNumber('MAX_EVENTS', 100)
 
   const valid: EventInput[] = []
   let invalid_count = 0
   let items_fetched = 0
-  const collectedLinks = new Set<string>()
+  const seenIds = new Set<string>()
 
   const headers: Record<string, string> = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'referer': 'https://www.sympla.com.br/',
   }
 
-  // Extended categories to get more events
+  // Categories based on Sympla's actual URL structure
   const categories = [
     'show-musica-festa',
-    'teatro-espetaculos', 
-    'gastronomia',
-    'cursos-workshops',
-    'congressos-palestras',
-    'esportes',
+    'teatro-espetaculo',
+    'gastronomico',
+    'curso-workshop',
+    'congresso-palestra',
+    'experiencias',
     'infantil',
-    'religiao-espiritualidade',
-    'passeios-tours',
-    '', // All events (no category filter)
+    'religioso-espiritual',
+    'saude-e-bem-estar',
+    'arte-e-cultura',
+    'games-e-geek',
+    'gratis',
   ]
 
   console.log(`Target: ${maxEventsTarget} events`)
 
-  // Phase 1: Collect all event links from category pages
+  // Phase 1: Extract events directly from listing pages
   for (const category of categories) {
-    if (collectedLinks.size >= maxEventsTarget * 2) break // Collect extra to account for duplicates
+    if (valid.length >= maxEventsTarget) break
     
-    const baseUrl = category 
-      ? `https://www.sympla.com.br/eventos/salvador-ba/${category}`
-      : `https://www.sympla.com.br/eventos/salvador-ba`
+    const url = `https://www.sympla.com.br/eventos/salvador-ba/${category}`
+    console.log(`Fetching category: ${url}`)
     
-    // Try multiple pages per category
-    for (let page = 1; page <= 5; page++) {
-      if (collectedLinks.size >= maxEventsTarget * 2) break
+    try {
+      const html = await fetchHtmlWithRetry(url, headers)
+      const events = extractEventsFromListingHtml(html, input)
       
-      const url = page === 1 ? baseUrl : `${baseUrl}?page=${page}`
-      console.log(`Fetching listing: ${url}`)
-      
-      try {
-        const html = await fetchHtmlWithRetry(url, headers)
-        
-        // Extract all event links from the page
-        const symplaLinks = html.match(/href="(https:\/\/www\.sympla\.com\.br\/evento\/[^"]+)"/g) || []
-        const biletoLinks = html.match(/href="(https:\/\/bileto\.sympla\.com\.br\/event\/[^"]+)"/g) || []
-        
-        const allLinks = [...symplaLinks, ...biletoLinks]
-          .map(l => l.replace(/href="|"/g, ''))
-          .filter(l => !l.includes('?') || l.includes('event')) // Filter out query params except event pages
-        
-        const newLinks = allLinks.filter(l => !collectedLinks.has(l))
-        newLinks.forEach(l => collectedLinks.add(l))
-        
-        console.log(`  Found ${newLinks.length} new links (total: ${collectedLinks.size})`)
-        
-        // If no new links found, move to next category
-        if (newLinks.length === 0) break
-        
-        await delay(requestDelayMs)
-      } catch (err) {
-        console.error(`Error fetching ${url}:`, err)
-        break
+      for (const ev of events) {
+        if (seenIds.has(ev.external_id)) continue
+        seenIds.add(ev.external_id)
+        valid.push(ev)
+        items_fetched++
       }
+      
+      console.log(`  Extracted ${events.length} events, total valid: ${valid.length}`)
+      await delay(requestDelayMs)
+    } catch (err) {
+      console.error(`Error fetching ${url}:`, err)
     }
   }
 
-  console.log(`\nCollected ${collectedLinks.size} unique event links. Fetching details...`)
-
-  // Phase 2: Fetch details for each event (limit to target)
-  const linksToFetch = Array.from(collectedLinks).slice(0, maxEventsTarget + 20) // Extra buffer
+  // Phase 2: Also fetch the main Salvador page
+  const mainUrl = `https://www.sympla.com.br/eventos/salvador-ba`
+  console.log(`Fetching main: ${mainUrl}`)
   
-  for (const link of linksToFetch) {
-    if (valid.length >= maxEventsTarget) {
-      console.log(`Reached target of ${maxEventsTarget} valid events`)
-      break
+  try {
+    const html = await fetchHtmlWithRetry(mainUrl, headers)
+    const events = extractEventsFromListingHtml(html, input)
+    
+    for (const ev of events) {
+      if (seenIds.has(ev.external_id)) continue
+      seenIds.add(ev.external_id)
+      valid.push(ev)
+      items_fetched++
     }
     
-    // Extract event ID from URL
-    const idMatch = link.match(/\/evento\/[^/]*-(\d+)(?:\?|$)/) || 
-                    link.match(/\/evento\/(\d+)/) ||
-                    link.match(/\/event\/(\d+)/)
-    if (!idMatch) {
-      console.log(`Could not extract ID from: ${link}`)
-      invalid_count++
-      continue
-    }
-    
-    const eventId = idMatch[1]
-    items_fetched++
-    
+    console.log(`  Extracted ${events.length} events, total valid: ${valid.length}`)
+  } catch (err) {
+    console.error(`Error fetching main:`, err)
+  }
+
+  // Phase 3: If we still don't have enough events, fetch individual event pages
+  // to get more details for events we found
+  const eventsNeedingDetails = valid.filter(e => !e.venue_name || e.title.startsWith('Event '))
+  console.log(`\n${eventsNeedingDetails.length} events need more details...`)
+  
+  for (const ev of eventsNeedingDetails.slice(0, 50)) {
     try {
-      console.log(`[${valid.length + 1}/${maxEventsTarget}] Fetching: ${link}`)
-      const eventHtml = await fetchHtmlWithRetry(link, headers)
-      const eventData = extractEventFromHtml(eventHtml, eventId, link, input)
+      console.log(`Fetching details: ${ev.url}`)
+      const html = await fetchHtmlWithRetry(ev.url, headers)
+      const detailed = extractEventFromHtml(html, ev.external_id, ev.url, input)
       
-      if (eventData && eventData.title && !eventData.title.includes('Sympla - Ingressos')) {
-        // Validate we have real data, not generic page title
-        valid.push(eventData)
-        console.log(`  ✓ ${eventData.title.slice(0, 50)}...`)
-      } else {
-        console.log(`  ✗ Invalid or generic data`)
-        invalid_count++
+      if (detailed && detailed.title && !detailed.title.includes('Sympla - Ingressos')) {
+        // Update the event with better data
+        ev.title = detailed.title
+        ev.start_datetime = detailed.start_datetime
+        ev.venue_name = detailed.venue_name || ev.venue_name
+        ev.image_url = detailed.image_url || ev.image_url
+        ev.price_text = detailed.price_text || ev.price_text
+        console.log(`  ✓ Updated: ${ev.title.slice(0, 40)}...`)
       }
       
-      await delay(300) // Faster delay for individual pages
+      await delay(300)
     } catch (err) {
       console.error(`  ✗ Error: ${err}`)
       invalid_count++
     }
   }
 
-  // Deduplicate by external_id (in case of duplicates)
-  const seen = new Set<string>()
-  const dedupedValid = valid.filter(e => {
-    if (seen.has(e.external_id)) return false
-    seen.add(e.external_id)
-    return true
-  })
+  console.log(`\nScrape complete: ${valid.length} valid, ${invalid_count} invalid, ${items_fetched} fetched`)
 
-  console.log(`\nScrape complete: ${dedupedValid.length} valid, ${invalid_count} invalid, ${items_fetched} fetched`)
-
-  return { valid: dedupedValid, invalid_count, items_fetched }
+  return { valid, invalid_count, items_fetched }
 }
