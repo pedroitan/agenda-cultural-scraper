@@ -71,6 +71,10 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
       // Click and wait for network to settle
       await loadMoreButton.click()
       await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
+      await page.waitForTimeout(1000)
+      
+      // Scroll to bottom of page to trigger content loading
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
       await page.waitForTimeout(1500)
       clickCount++
       
