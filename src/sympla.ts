@@ -269,8 +269,8 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
   }
   
   // Extract from HTML patterns using Sympla's CSS classes
-  // Date: <div class="qtfy415...">Sábado, 17 de Jan às 14:30</div>
   // Title: <h3 class="pn67h1e">TITLE</h3>
+  // Date: <div class="qtfy415...">Sexta, 24 de Abr às 19:00</div>
   // Venue: <p class="pn67h1g">VENUE</p>
   
   // Find all event card links with their content
@@ -280,28 +280,44 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
     const [, url, cardContent] = match
     if (!url) continue
     
-    // Extract title from h3
-    const titleMatch = cardContent.match(/<h3[^>]*>([^<]+)<\/h3>/i)
+    // Extract title from h3 with class pn67h1e
+    const titleMatch = cardContent.match(/<h3[^>]*class="[^"]*pn67h1e[^"]*"[^>]*>([^<]+)<\/h3>/i) ||
+                       cardContent.match(/<h3[^>]*>([^<]+)<\/h3>/i)
     const title = titleMatch ? titleMatch[1].trim() : null
     
-    // Extract venue from p tag
+    // Extract venue from p tag with class pn67h1g
     const venueMatch = cardContent.match(/<p[^>]*class="[^"]*pn67h1g[^"]*"[^>]*>([^<]+)<\/p>/i) ||
                        cardContent.match(/<p[^>]*>([^<]*Salvador[^<]*)<\/p>/i)
     const venue = venueMatch ? venueMatch[1].trim() : undefined
     
-    // Extract date from div with qtfy classes
-    const dateMatch = cardContent.match(/<div[^>]*class="[^"]*qtfy[^"]*"[^>]*>([^<]+)<\/div>/i) ||
-                      cardContent.match(/(\w+,\s*\d{1,2}\s+de\s+\w+\s+às?\s*\d{1,2}:\d{2})/i)
-    const dateStr = dateMatch ? dateMatch[1].trim() : null
+    // Extract image URL from img tag
+    const imgMatch = cardContent.match(/<img[^>]*src="([^"]+)"[^>]*>/i) ||
+                     cardContent.match(/style="[^"]*background-image:\s*url\(['"]?([^'")\s]+)['"]?\)/i)
+    let imageUrl = imgMatch ? imgMatch[1] : undefined
+    // Clean up image URL if needed
+    if (imageUrl && !imageUrl.startsWith('http')) {
+      imageUrl = imageUrl.startsWith('//') ? `https:${imageUrl}` : `https://www.sympla.com.br${imageUrl}`
+    }
+    
+    // Extract date from div with qtfy classes - format: "Sexta, 24 de Abr às 19:00"
+    const dateMatch = cardContent.match(/<div[^>]*class="[^"]*qtfy\d+[^"]*"[^>]*>([^<]+)<\/div>/i)
+    let dateStr = dateMatch ? dateMatch[1].trim() : null
+    
+    // Also try to find date pattern anywhere in the content
+    if (!dateStr) {
+      const datePatternMatch = cardContent.match(/(\w+,\s*\d{1,2}\s+de\s+\w+\s+às?\s*\d{1,2}:\d{2})/i)
+      dateStr = datePatternMatch ? datePatternMatch[1].trim() : null
+    }
     
     if (title && !title.includes('Sympla')) {
       const idMatch = url.match(/(\d+)(?:\?|$)/)
       if (idMatch) {
-        // Parse date string like "Sábado, 17 de Jan às 14:30"
+        // Parse date string like "Sexta, 24 de Abr às 19:00"
         let startDatetime: string
         if (dateStr) {
           const parsed = parseBrazilianDate(dateStr)
           startDatetime = parsed || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          console.log(`    Date parsed: "${dateStr}" -> ${startDatetime}`)
         } else {
           startDatetime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
         }
@@ -313,9 +329,10 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
           start_datetime: startDatetime,
           city: input.city,
           venue_name: venue,
+          image_url: imageUrl,
           is_free: false,
           url: url.startsWith('http') ? url : `https://www.sympla.com.br${url}`,
-          raw_payload: { title, venue, dateStr, url },
+          raw_payload: { title, venue, dateStr, imageUrl, url },
         })
       }
     }
