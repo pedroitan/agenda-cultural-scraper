@@ -8,3 +8,7 @@ yarn-error.log*
 .pnpm-debug.log*
 coverage/
 dist/
+
+# Instagram session
+instagram-cookies.json
+screenshot-*.png

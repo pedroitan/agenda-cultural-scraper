@@ -5,8 +5,10 @@
 O scraper do Instagram tem **3 estratégias** para buscar posts:
 
 1. **RSSHub** (primária) - Mais rápido, sem risco de bloqueio
-2. **Playwright sem login** (fallback 1) - Tenta acessar perfil público
-3. **Playwright com login** (fallback 2) - Usa conta do Instagram para acesso garantido
+2. **Playwright com cookies salvos** (fallback 1) - Reutiliza sessão de login anterior
+3. **Playwright com login automático** (fallback 2) - Tenta login (pode ser bloqueado pelo Instagram)
+
+⚠️ **Importante**: O Instagram detecta e bloqueia login automatizado. Por isso, usamos **cookies persistentes** - você faz login manual uma vez e o scraper reutiliza a sessão.
 
 ## Configuração de Login (Opcional mas Recomendado)
 
@@ -42,18 +44,35 @@ INSTAGRAM_PASSWORD=sua_senha_instagram
 
 ## Como testar
 
-### Sem login (pode ser bloqueado):
+### Primeira vez - Login Manual (Recomendado):
+
+1. Configure o `.env`:
+```bash
+INSTAGRAM_DEBUG=true
+INSTAGRAM_USERNAME=seu_usuario
+INSTAGRAM_PASSWORD=sua_senha
+```
+
+2. Rode o scraper:
 ```bash
 npm run build
 node dist/instagram-monitor-entry.js
 ```
 
-### Com login:
+3. O navegador vai abrir visualmente
+4. **Faça login manualmente** no Instagram quando solicitado
+5. Após login bem-sucedido, os cookies serão salvos em `instagram-cookies.json`
+6. Nas próximas execuções, o scraper reutilizará esses cookies automaticamente
+
+### Execuções seguintes:
+
 ```bash
-# Configure .env primeiro
+# Não precisa mais de INSTAGRAM_DEBUG=true
 npm run build
 node dist/instagram-monitor-entry.js
 ```
+
+O scraper vai carregar os cookies salvos e não precisará fazer login novamente!
 
 ## Logs esperados
 

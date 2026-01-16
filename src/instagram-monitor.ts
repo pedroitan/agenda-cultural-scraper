@@ -7,6 +7,12 @@ const RSSHUB_URL = 'https://rsshub.app/instagram/user/agendaalternativasalvador'
 const INSTAGRAM_PROFILE = 'agendaalternativasalvador'
 const INSTAGRAM_URL = `https://www.instagram.com/${INSTAGRAM_PROFILE}/`
 
+// Helper function for random delays (more human-like)
+function randomDelay(min: number, max: number): Promise<void> {
+  const delay = Math.floor(Math.random() * (max - min + 1)) + min
+  return new Promise(resolve => setTimeout(resolve, delay))
+}
+
 interface RSSItem {
   title: string
   link: string
@@ -63,13 +69,38 @@ async function fetchRSSFeed(): Promise<RSSFeed | null> {
 async function fetchInstagramDirectly(): Promise<RSSFeed | null> {
   console.log(`\n⚠️  RSSHub failed, trying direct Instagram scraping with Playwright...`)
   
-  const browser = await chromium.launch({ headless: true })
+  // Use headless: false for local debugging, true for production
+  const isDebugMode = process.env.INSTAGRAM_DEBUG === 'true'
+  const browser = await chromium.launch({ 
+    headless: !isDebugMode,
+    slowMo: isDebugMode ? 100 : 0,
+  })
   
   try {
-    const page = await browser.newPage({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      viewport: { width: 1920, height: 1080 },
-    })
+    // Try to load saved cookies for persistent session
+    const fs = await import('fs')
+    const cookiesPath = 'instagram-cookies.json'
+    let context
+    
+    if (fs.existsSync(cookiesPath)) {
+      console.log('📂 Loading saved Instagram session...')
+      const cookies = JSON.parse(fs.readFileSync(cookiesPath, 'utf-8'))
+      context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        viewport: { width: 1920, height: 1080 },
+      })
+      await context.addCookies(cookies)
+    } else {
+      console.log('⚠️  No saved session found. You need to login manually first.')
+      console.log('💡 Run with INSTAGRAM_DEBUG=true and login manually in the browser.')
+      console.log('💡 After successful login, cookies will be saved automatically.')
+      context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        viewport: { width: 1920, height: 1080 },
+      })
+    }
+    
+    const page = await context.newPage()
 
     // Optional: Login if credentials are provided
     const igUsername = process.env.INSTAGRAM_USERNAME
@@ -79,18 +110,28 @@ async function fetchInstagramDirectly(): Promise<RSSFeed | null> {
       console.log(`Logging in as ${igUsername}...`)
       
       await page.goto('https://www.instagram.com/accounts/login/', { waitUntil: 'domcontentloaded', timeout: 45000 })
-      await page.waitForTimeout(3000)
+      await randomDelay(2000, 4000)
       
       // Wait for login form to be visible
-      await page.waitForSelector('input[name="username"]', { timeout: 10000 })
+      await page.waitForSelector('input[name="username"]', { timeout: 15000 })
+      await randomDelay(500, 1500)
       
-      // Fill login form
-      await page.fill('input[name="username"]', igUsername, { timeout: 10000 })
-      await page.fill('input[name="password"]', igPassword, { timeout: 10000 })
+      // Fill login form with human-like typing
+      await page.click('input[name="username"]')
+      await randomDelay(300, 800)
+      await page.type('input[name="username"]', igUsername, { delay: 100 })
+      await randomDelay(500, 1000)
+      
+      await page.click('input[name="password"]')
+      await randomDelay(300, 800)
+      await page.type('input[name="password"]', igPassword, { delay: 120 })
+      await randomDelay(800, 1500)
+      
       await page.click('button[type="submit"]')
+      console.log('Waiting for login to complete...')
       
       // Wait for navigation after login
-      await page.waitForTimeout(8000)
+      await randomDelay(6000, 10000)
       
       // Check for login error
       const errorMessage = await page.$eval('div#slfErrorAlert', (el) => el.textContent).catch(() => null)
@@ -113,6 +154,11 @@ async function fetchInstagramDirectly(): Promise<RSSFeed | null> {
       await page.waitForTimeout(1000)
       
       console.log('✅ Logged in successfully')
+      
+      // Save cookies for future use
+      const cookies = await context.cookies()
+      fs.writeFileSync(cookiesPath, JSON.stringify(cookies, null, 2))
+      console.log('💾 Session cookies saved for future use')
     }
 
     console.log(`Navigating to ${INSTAGRAM_URL}`)
