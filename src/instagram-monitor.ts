@@ -71,38 +71,96 @@ async function fetchInstagramDirectly(): Promise<RSSFeed | null> {
       viewport: { width: 1920, height: 1080 },
     })
 
-    console.log(`Navigating to ${INSTAGRAM_URL}`)
-    await page.goto(INSTAGRAM_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    // Optional: Login if credentials are provided
+    const igUsername = process.env.INSTAGRAM_USERNAME
+    const igPassword = process.env.INSTAGRAM_PASSWORD
     
-    // Wait for posts to load
-    await page.waitForSelector('article', { timeout: 10000 }).catch(() => {
-      console.log('Could not find article elements')
-    })
+    if (igUsername && igPassword) {
+      console.log(`Logging in as ${igUsername}...`)
+      
+      await page.goto('https://www.instagram.com/accounts/login/', { waitUntil: 'networkidle', timeout: 30000 })
+      await page.waitForTimeout(2000)
+      
+      // Fill login form
+      await page.fill('input[name="username"]', igUsername)
+      await page.fill('input[name="password"]', igPassword)
+      await page.click('button[type="submit"]')
+      
+      // Wait for navigation after login
+      await page.waitForTimeout(5000)
+      
+      // Handle "Save Your Login Info?" popup
+      await page.click('button:has-text("Not Now")').catch(() => {})
+      await page.click('button:has-text("Agora não")').catch(() => {})
+      await page.waitForTimeout(2000)
+      
+      // Handle "Turn on Notifications?" popup
+      await page.click('button:has-text("Not Now")').catch(() => {})
+      await page.click('button:has-text("Agora não")').catch(() => {})
+      await page.waitForTimeout(1000)
+      
+      console.log('✅ Logged in successfully')
+    }
 
-    // Get first post link
-    const firstPostLink = await page.$eval('article a[href*="/p/"]', (el) => el.getAttribute('href'))
+    console.log(`Navigating to ${INSTAGRAM_URL}`)
+    await page.goto(INSTAGRAM_URL, { waitUntil: 'networkidle', timeout: 30000 })
+    
+    // Try to close login popup if it appears
+    await page.click('button:has-text("Not Now")').catch(() => {})
+    await page.click('button:has-text("Agora não")').catch(() => {})
+    
+    // Wait a bit for page to settle
+    await page.waitForTimeout(2000)
+    
+    // Try multiple selectors for posts
+    let firstPostLink: string | null = null
+    
+    // Try selector 1: article a
+    firstPostLink = await page.$eval('article a[href*="/p/"]', (el) => el.getAttribute('href')).catch(() => null)
+    
+    // Try selector 2: main a
+    if (!firstPostLink) {
+      firstPostLink = await page.$eval('main a[href*="/p/"]', (el) => el.getAttribute('href')).catch(() => null)
+    }
+    
+    // Try selector 3: any link with /p/
+    if (!firstPostLink) {
+      firstPostLink = await page.$eval('a[href*="/p/"]', (el) => el.getAttribute('href')).catch(() => null)
+    }
     
     if (!firstPostLink) {
-      console.error('Could not find first post link')
+      console.error('❌ Could not find any post link. Instagram may be blocking access.')
+      console.log('Page title:', await page.title())
       return null
     }
 
     const fullPostUrl = `https://www.instagram.com${firstPostLink}`
-    console.log(`Found first post: ${fullPostUrl}`)
+    console.log(`✅ Found first post: ${fullPostUrl}`)
 
     // Navigate to post
-    await page.goto(fullPostUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await page.goto(fullPostUrl, { waitUntil: 'networkidle', timeout: 30000 })
+    await page.waitForTimeout(2000)
     
-    // Wait for caption
-    await page.waitForSelector('h1', { timeout: 10000 }).catch(() => {
-      console.log('Could not find caption')
-    })
+    // Try to close login popup again
+    await page.click('button:has-text("Not Now")').catch(() => {})
+    await page.click('button:has-text("Agora não")').catch(() => {})
 
-    // Extract caption text
-    const caption = await page.$eval('h1', (el) => el.textContent || '').catch(() => '')
+    // Try multiple selectors for caption
+    let caption = ''
+    
+    // Try selector 1: h1
+    caption = await page.$eval('h1', (el) => el.textContent || '').catch(() => '')
+    
+    // Try selector 2: span with long text
+    if (!caption) {
+      const spans = await page.$$eval('span', (elements) => 
+        elements.map(el => el.textContent || '').filter(text => text.length > 50)
+      ).catch(() => [])
+      caption = spans[0] || ''
+    }
     
     if (!caption) {
-      console.error('Could not extract caption text')
+      console.error('❌ Could not extract caption text')
       return null
     }
 
