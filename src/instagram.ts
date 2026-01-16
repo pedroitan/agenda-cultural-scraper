@@ -101,6 +101,42 @@ function parsePrice(priceStr: string): { is_free: boolean; price_text: string | 
   return { is_free: false, price_text: priceStr }
 }
 
+function buildEventInput(parsed: InstagramEvent, baseDate: Date, postUrl: string): EventInput | null {
+  // Build title
+  const title = parsed.projeto || parsed.atracoes || 'Evento'
+  
+  // Build datetime
+  const time = parsed.horario ? parseTime(parsed.horario) : '20:00'
+  const [hour, minute] = time.split(':')
+  const eventDate = new Date(baseDate)
+  eventDate.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0)
+  const start_datetime = eventDate.toISOString().replace('Z', '').slice(0, 19)
+
+  // Parse price
+  const { is_free, price_text } = parsed.quanto 
+    ? parsePrice(parsed.quanto)
+    : { is_free: false, price_text: null }
+
+  // Build external_id (hash of title + date + venue)
+  const idString = `${title}-${start_datetime}-${parsed.local || ''}`
+  const external_id = `instagram-${Buffer.from(idString).toString('base64').slice(0, 32)}`
+
+  return {
+    external_id,
+    source: 'instagram',
+    city: 'Salvador',
+    title,
+    start_datetime,
+    venue_name: parsed.local || undefined,
+    image_url: undefined,
+    url: postUrl,
+    price_text: price_text || undefined,
+    is_free,
+    category: 'Shows e Festas',
+    raw_payload: parsed,
+  }
+}
+
 export function parseInstagramPost(postText: string, postUrl: string): EventInput[] {
   const events: EventInput[] = []
 
@@ -114,45 +150,34 @@ export function parseInstagramPost(postText: string, postUrl: string): EventInpu
   // Split by separator lines
   const blocks = postText.split(/_{5,}|─{5,}/).filter(b => b.trim())
 
+  // Process all blocks (including first one which may contain title + first event)
   for (const block of blocks) {
+    // Check if block contains title (has ♫ or #)
+    if (block.includes('♫') || block.includes('#')) {
+      // Try to extract event from this block too (after the title line)
+      const lines = block.split('\n')
+      const eventStartIndex = lines.findIndex(l => 
+        /^(Projeto:|Atra[çc][õo](?:es)?:|Local:)/i.test(l.trim())
+      )
+      
+      if (eventStartIndex > 0) {
+        // There's an event after the title in this block
+        const eventText = lines.slice(eventStartIndex).join('\n')
+        const parsed = parseEventBlock(eventText, baseDate)
+        if (parsed) {
+          const eventInput = buildEventInput(parsed, baseDate, postUrl)
+          if (eventInput) events.push(eventInput)
+        }
+      }
+      continue
+    }
+
+    // Regular event block
     const parsed = parseEventBlock(block, baseDate)
     if (!parsed) continue
 
-    // Build title
-    const title = parsed.projeto || parsed.atracoes || 'Evento'
-    
-    // Build datetime
-    const time = parsed.horario ? parseTime(parsed.horario) : '20:00'
-    const [hour, minute] = time.split(':')
-    const eventDate = new Date(baseDate)
-    eventDate.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0)
-    const start_datetime = eventDate.toISOString().replace('Z', '').slice(0, 19)
-
-    // Parse price
-    const { is_free, price_text } = parsed.quanto 
-      ? parsePrice(parsed.quanto)
-      : { is_free: false, price_text: null }
-
-    // Build external_id (hash of title + date + venue)
-    const idString = `${title}-${start_datetime}-${parsed.local || ''}`
-    const external_id = `instagram-${Buffer.from(idString).toString('base64').slice(0, 32)}`
-
-    const event: EventInput = {
-      external_id,
-      source: 'instagram',
-      city: 'Salvador',
-      title,
-      start_datetime,
-      venue_name: parsed.local || undefined,
-      image_url: undefined, // Instagram posts don't have per-event images
-      url: postUrl,
-      price_text: price_text || undefined,
-      is_free,
-      category: 'Shows e Festas', // Default category for Instagram events
-      raw_payload: parsed,
-    }
-
-    events.push(event)
+    const eventInput = buildEventInput(parsed, baseDate, postUrl)
+    if (eventInput) events.push(eventInput)
   }
 
   console.log(`Parsed ${events.length} events from Instagram post`)
