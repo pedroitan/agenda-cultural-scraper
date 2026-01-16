@@ -78,16 +78,29 @@ async function fetchInstagramDirectly(): Promise<RSSFeed | null> {
     if (igUsername && igPassword) {
       console.log(`Logging in as ${igUsername}...`)
       
-      await page.goto('https://www.instagram.com/accounts/login/', { waitUntil: 'networkidle', timeout: 30000 })
-      await page.waitForTimeout(2000)
+      await page.goto('https://www.instagram.com/accounts/login/', { waitUntil: 'domcontentloaded', timeout: 45000 })
+      await page.waitForTimeout(3000)
+      
+      // Wait for login form to be visible
+      await page.waitForSelector('input[name="username"]', { timeout: 10000 })
       
       // Fill login form
-      await page.fill('input[name="username"]', igUsername)
-      await page.fill('input[name="password"]', igPassword)
+      await page.fill('input[name="username"]', igUsername, { timeout: 10000 })
+      await page.fill('input[name="password"]', igPassword, { timeout: 10000 })
       await page.click('button[type="submit"]')
       
       // Wait for navigation after login
-      await page.waitForTimeout(5000)
+      await page.waitForTimeout(8000)
+      
+      // Check for login error
+      const errorMessage = await page.$eval('div#slfErrorAlert', (el) => el.textContent).catch(() => null)
+      if (errorMessage) {
+        console.error(`❌ Login error: ${errorMessage}`)
+        console.log('⚠️  Verifique se a senha está correta no .env')
+        console.log('⚠️  Instagram pode estar bloqueando login automatizado')
+        console.log('⚠️  Considere desabilitar 2FA ou usar App Password')
+        return null
+      }
       
       // Handle "Save Your Login Info?" popup
       await page.click('button:has-text("Not Now")').catch(() => {})
@@ -112,30 +125,38 @@ async function fetchInstagramDirectly(): Promise<RSSFeed | null> {
     // Wait a bit for page to settle
     await page.waitForTimeout(2000)
     
-    // Try multiple selectors for posts
-    let firstPostLink: string | null = null
+    // Get multiple posts (first might be pinned)
+    let postLinks: string[] = []
     
-    // Try selector 1: article a
-    firstPostLink = await page.$eval('article a[href*="/p/"]', (el) => el.getAttribute('href')).catch(() => null)
+    // Try to get all post links
+    postLinks = await page.$$eval('article a[href*="/p/"]', (elements) => 
+      elements.map(el => el.getAttribute('href')).filter(href => href !== null) as string[]
+    ).catch(() => [])
     
-    // Try selector 2: main a
-    if (!firstPostLink) {
-      firstPostLink = await page.$eval('main a[href*="/p/"]', (el) => el.getAttribute('href')).catch(() => null)
+    // Fallback: try main selector
+    if (postLinks.length === 0) {
+      postLinks = await page.$$eval('main a[href*="/p/"]', (elements) => 
+        elements.map(el => el.getAttribute('href')).filter(href => href !== null) as string[]
+      ).catch(() => [])
     }
     
-    // Try selector 3: any link with /p/
-    if (!firstPostLink) {
-      firstPostLink = await page.$eval('a[href*="/p/"]', (el) => el.getAttribute('href')).catch(() => null)
+    // Fallback: try any link
+    if (postLinks.length === 0) {
+      postLinks = await page.$$eval('a[href*="/p/"]', (elements) => 
+        elements.map(el => el.getAttribute('href')).filter(href => href !== null) as string[]
+      ).catch(() => [])
     }
     
-    if (!firstPostLink) {
-      console.error('❌ Could not find any post link. Instagram may be blocking access.')
+    if (postLinks.length === 0) {
+      console.error('❌ Could not find any post links. Instagram may be blocking access.')
       console.log('Page title:', await page.title())
       return null
     }
 
-    const fullPostUrl = `https://www.instagram.com${firstPostLink}`
-    console.log(`✅ Found first post: ${fullPostUrl}`)
+    // Try second post first (first might be pinned), fallback to first if only one exists
+    const postToUse = postLinks.length > 1 ? postLinks[1] : postLinks[0]
+    const fullPostUrl = `https://www.instagram.com${postToUse}`
+    console.log(`✅ Found ${postLinks.length} posts, using: ${fullPostUrl}`)
 
     // Navigate to post
     await page.goto(fullPostUrl, { waitUntil: 'networkidle', timeout: 30000 })
@@ -167,7 +188,7 @@ async function fetchInstagramDirectly(): Promise<RSSFeed | null> {
     console.log(`✅ Extracted caption (${caption.length} chars)`)
 
     // Create RSS-like item
-    const postId = firstPostLink.match(/\/p\/([^\/]+)/)?.[1] || ''
+    const postId = postToUse.match(/\/p\/([^\/]+)/)?.[1] || ''
     const item: RSSItem = {
       title: caption.substring(0, 100),
       link: fullPostUrl,

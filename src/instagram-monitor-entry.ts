@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { runInstagramMonitor } from './instagram-monitor.js'
 
 runInstagramMonitor()
