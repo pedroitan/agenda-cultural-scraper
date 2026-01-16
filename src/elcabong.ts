@@ -19,7 +19,9 @@ function parseElCabongDate(dateStr: string): string | null {
   const hour = match[4] ? match[4].padStart(2, '0') : '20'
   const minute = match[5] || '00'
 
-  return `${year}-${month}-${day}T${hour}:${minute}:00`
+  // El Cabong agenda times are local (Salvador/Brazil). Persist with explicit TZ offset
+  // so Postgres timestamptz stores the correct instant.
+  return `${year}-${month}-${day}T${hour}:${minute}:00-03:00`
 }
 
 export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongScrapeResult> {
