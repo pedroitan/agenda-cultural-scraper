@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
+import { chromium } from 'playwright'
 import { parseInstagramPost } from './instagram.js'
 import { EventInput } from './types.js'
 
 const RSSHUB_URL = 'https://rsshub.app/instagram/user/agendaalternativasalvador'
 const INSTAGRAM_PROFILE = 'agendaalternativasalvador'
+const INSTAGRAM_URL = `https://www.instagram.com/${INSTAGRAM_PROFILE}/`
 
 interface RSSItem {
   title: string
@@ -34,7 +36,7 @@ async function fetchRSSFeed(): Promise<RSSFeed | null> {
 
     const xml = await response.text()
     
-    // Simple XML parsing for RSS (could use a library like 'rss-parser' but keeping it simple)
+    // Simple XML parsing for RSS
     const items: RSSItem[] = []
     const itemMatches = xml.matchAll(/<item>(.*?)<\/item>/gs)
     
@@ -55,6 +57,73 @@ async function fetchRSSFeed(): Promise<RSSFeed | null> {
   } catch (error) {
     console.error('Error fetching RSS feed:', error)
     return null
+  }
+}
+
+async function fetchInstagramDirectly(): Promise<RSSFeed | null> {
+  console.log(`\n⚠️  RSSHub failed, trying direct Instagram scraping with Playwright...`)
+  
+  const browser = await chromium.launch({ headless: true })
+  
+  try {
+    const page = await browser.newPage({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      viewport: { width: 1920, height: 1080 },
+    })
+
+    console.log(`Navigating to ${INSTAGRAM_URL}`)
+    await page.goto(INSTAGRAM_URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    
+    // Wait for posts to load
+    await page.waitForSelector('article', { timeout: 10000 }).catch(() => {
+      console.log('Could not find article elements')
+    })
+
+    // Get first post link
+    const firstPostLink = await page.$eval('article a[href*="/p/"]', (el) => el.getAttribute('href'))
+    
+    if (!firstPostLink) {
+      console.error('Could not find first post link')
+      return null
+    }
+
+    const fullPostUrl = `https://www.instagram.com${firstPostLink}`
+    console.log(`Found first post: ${fullPostUrl}`)
+
+    // Navigate to post
+    await page.goto(fullPostUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    
+    // Wait for caption
+    await page.waitForSelector('h1', { timeout: 10000 }).catch(() => {
+      console.log('Could not find caption')
+    })
+
+    // Extract caption text
+    const caption = await page.$eval('h1', (el) => el.textContent || '').catch(() => '')
+    
+    if (!caption) {
+      console.error('Could not extract caption text')
+      return null
+    }
+
+    console.log(`✅ Extracted caption (${caption.length} chars)`)
+
+    // Create RSS-like item
+    const postId = firstPostLink.match(/\/p\/([^\/]+)/)?.[1] || ''
+    const item: RSSItem = {
+      title: caption.substring(0, 100),
+      link: fullPostUrl,
+      pubDate: new Date().toISOString(),
+      content: caption,
+      guid: postId,
+    }
+
+    return { items: [item] }
+  } catch (error) {
+    console.error('Error scraping Instagram directly:', error)
+    return null
+  } finally {
+    await browser.close()
   }
 }
 
@@ -122,11 +191,17 @@ export async function runInstagramMonitor(): Promise<void> {
 
   const supabase = createClient(supabaseUrl, supabaseKey)
 
-  // Fetch RSS feed
-  const feed = await fetchRSSFeed()
+  // Try RSS feed first, fallback to Playwright if it fails
+  let feed = await fetchRSSFeed()
+  
   if (!feed || feed.items.length === 0) {
-    console.log('⚠️  No posts found in RSS feed')
-    return
+    console.log('⚠️  RSS feed failed, trying Playwright fallback...')
+    feed = await fetchInstagramDirectly()
+    
+    if (!feed || feed.items.length === 0) {
+      console.log('❌ Both RSS and Playwright failed. No posts found.')
+      return
+    }
   }
 
   // Get last processed post
