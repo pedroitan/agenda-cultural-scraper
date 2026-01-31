@@ -7,10 +7,16 @@ type ElCabongScrapeResult = {
   items_fetched: number
 }
 
-// Parse date like "11/12/2025 - 21:00" to ISO string
+// Parse date like "28-01-2026 @ 19:00" or "11/12/2025 - 21:00" to ISO string
 function parseElCabongDate(dateStr: string): string | null {
-  // Format: "11/12/2025 - 21:00" or "11/12/2025"
-  const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s*-\s*(\d{1,2}):(\d{2}))?/)
+  // Format 1: "28-01-2026 @ 19:00" (new format with dashes and @)
+  let match = dateStr.match(/(\d{1,2})-(\d{1,2})-(\d{4})(?:\s*@\s*(\d{1,2}):(\d{2}))?/)
+  
+  // Format 2: "11/12/2025 - 21:00" (old format with slashes and -)
+  if (!match) {
+    match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s*-\s*(\d{1,2}):(\d{2}))?/)
+  }
+  
   if (!match) return null
 
   const day = match[1].padStart(2, '0')
