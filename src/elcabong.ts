@@ -47,6 +47,35 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     })
     console.log('Page loaded')
 
+    // Close any popups that might appear
+    try {
+      // Wait a bit for popup to appear
+      await page.waitForTimeout(2000)
+      
+      // Try common popup close selectors
+      const closeSelectors = [
+        '.popup-close',
+        '.modal-close',
+        '[aria-label="Close"]',
+        'button[class*="close"]',
+        '.fancybox-close',
+        '#close-popup',
+        '.mfp-close'
+      ]
+      
+      for (const selector of closeSelectors) {
+        const closeButton = page.locator(selector).first()
+        if (await closeButton.count() > 0 && await closeButton.isVisible().catch(() => false)) {
+          await closeButton.click()
+          console.log(`  Closed popup using selector: ${selector}`)
+          await page.waitForTimeout(1000)
+          break
+        }
+      }
+    } catch (e) {
+      console.log('  No popup to close or already closed')
+    }
+
     // Wait for event elements to appear
     try {
       await page.waitForSelector('.wpem-event-box-col', { timeout: 15000 })
@@ -134,9 +163,13 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         const location = (event.querySelector('.wpem-event-location') as HTMLElement)?.textContent?.trim() || null
         const link = (event.querySelector('a.wpem-event-action-url') as HTMLAnchorElement)?.href || null
         const bannerImg = event.querySelector('.wpem-event-banner-img') as HTMLElement
-        const imageUrl = bannerImg?.style?.backgroundImage
-          ?.replace(/url\(["']?/, '')
-          ?.replace(/["']?\)$/, '') || null
+        // Try SpeedyCache attribute first, then background-image
+        let imageUrl = bannerImg?.getAttribute('data-speedycache-original-src') || null
+        if (!imageUrl) {
+          imageUrl = bannerImg?.style?.backgroundImage
+            ?.replace(/url\(["']?/, '')
+            ?.replace(/["']?\)$/, '') || null
+        }
 
         if (title && date && location && link) {
           results.push({
