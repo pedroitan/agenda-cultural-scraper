@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import { runSymplaScrape } from './sympla.js'
 import { runElCabongScrape } from './elcabong.js'
+import { runInstagramVisionScrape } from './instagram-vision.js'
 import { supabase } from './supabase.js'
 import type { EventInput, ScrapeRunInsert, ScraperInput } from './types.js'
 
@@ -73,11 +74,12 @@ async function main() {
   const scrapers = [
     { name: 'sympla', run: runSymplaScrape },
     { name: 'elcabong', run: runElCabongScrape },
+    { name: 'instagram', run: (input: ScraperInput) => runInstagramVisionScrape(input, 'agendaalternativasalvador') },
   ]
 
   for (const scraper of scrapers) {
     const input: ScraperInput = {
-      source: scraper.name as 'sympla' | 'elcabong',
+      source: scraper.name as 'sympla' | 'elcabong' | 'instagram',
       city,
       untilDays: env.SCRAPE_UNTIL_DAYS,
     }

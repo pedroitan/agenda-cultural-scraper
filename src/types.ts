@@ -1,5 +1,5 @@
 export type ScraperInput = {
-  source: 'sympla' | 'elcabong'
+  source: 'sympla' | 'elcabong' | 'instagram'
   city: 'salvador'
   untilDays?: number
 }
