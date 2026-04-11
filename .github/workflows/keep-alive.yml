@@ -1,0 +1,15 @@
+name: Keep Alive
+
+on:
+  schedule:
+    # Roda toda segunda-feira às 12:00 UTC para evitar desativação do GitHub Actions
+    # GitHub desativa workflows agendados após 60 dias sem commits
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep workflow active
+        run: echo "Keep alive ping - $(date)"
