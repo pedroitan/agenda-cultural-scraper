@@ -269,9 +269,10 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
   }
   
   // Extract from HTML patterns using Sympla's CSS classes
-  // Title: <h3 class="pn67h1e">TITLE</h3>
+  // Title: <h3 class="pn67h1f">TITLE</h3>
   // Date: <div class="qtfy415...">Sexta, 24 de Abr às 19:00</div>
-  // Venue: <p class="pn67h1g">VENUE</p>
+  // Venue: <p class="pn67h1h">VENUE - CITY, STATE</p>
+  // Image: <img class="pn67h1c" src="https://images.sympla.com.br/..."/>
   
   // Find all event card links with their content
   const cardPattern = /<a[^>]*href="([^"]*(?:\/evento\/|\/event\/)[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
@@ -280,43 +281,41 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
     const [, url, cardContent] = match
     if (!url) continue
     
-    // Extract title from h3 with class pn67h1e
-    const titleMatch = cardContent.match(/<h3[^>]*class="[^"]*pn67h1e[^"]*"[^>]*>([^<]+)<\/h3>/i) ||
+    // Extract title from h3 with class pn67h1f
+    const titleMatch = cardContent.match(/<h3[^>]*class="[^"]*pn67h1f[^"]*"[^>]*>([^<]+)<\/h3>/i) ||
                        cardContent.match(/<h3[^>]*>([^<]+)<\/h3>/i)
     const title = titleMatch ? titleMatch[1].trim() : null
     
-    // Extract venue from p tag with class pn67h1g
-    const venueMatch = cardContent.match(/<p[^>]*class="[^"]*pn67h1g[^"]*"[^>]*>([^<]+)<\/p>/i) ||
-                       cardContent.match(/<p[^>]*>([^<]*Salvador[^<]*)<\/p>/i)
+    // Extract venue from p tag with class pn67h1h (e.g. "Colaboraê - Salvador, BA")
+    const venueMatch = cardContent.match(/<p[^>]*class="[^"]*pn67h1h[^"]*"[^>]*>([^<]+)<\/p>/i) ||
+                       cardContent.match(/<p[^>]*>([^<]+-[^<]*, BA[^<]*)<\/p>/i)
     const venue = venueMatch ? venueMatch[1].trim() : undefined
     
     // Extract image URL from img tag - Sympla uses srcset with encoded URLs
     // Try to get from srcset first (better quality), then src
     let imageUrl: string | undefined = undefined
     
-    // Pattern 1: Extract from srcset - get the URL inside the _next/image wrapper
-    const srcsetMatch = cardContent.match(/srcset="[^"]*url=([^&"]+)/i)
-    if (srcsetMatch) {
-      // URL is encoded, decode it
-      imageUrl = decodeURIComponent(srcsetMatch[1])
+    // Pattern 1: Extract from img with class pn67h1c (direct images.sympla.com.br URL)
+    const sympla1cMatch = cardContent.match(/<img[^>]*class="[^"]*pn67h1c[^"]*"[^>]*src="(https:\/\/images\.sympla\.com\.br\/[^"]+)"/i)
+    if (sympla1cMatch) {
+      imageUrl = sympla1cMatch[1]
     }
     
-    // Pattern 2: Extract from src attribute
+    // Pattern 2: Any images.sympla.com.br URL in the card
     if (!imageUrl) {
-      const srcMatch = cardContent.match(/<img[^>]*src="([^"]+)"[^>]*>/i)
-      if (srcMatch) {
-        const srcUrl = srcMatch[1]
-        // Check if it's a _next/image URL with encoded original
-        const urlParam = srcUrl.match(/url=([^&]+)/)
-        if (urlParam) {
-          imageUrl = decodeURIComponent(urlParam[1])
-        } else {
-          imageUrl = srcUrl
-        }
+      const symplaImgMatch = cardContent.match(/src="(https:\/\/images\.sympla\.com\.br\/[^"]+)"/i)
+      imageUrl = symplaImgMatch ? symplaImgMatch[1] : undefined
+    }
+
+    // Pattern 3: Extract from srcset - get the URL inside the _next/image wrapper
+    if (!imageUrl) {
+      const srcsetMatch = cardContent.match(/srcset="[^"]*url=([^&"]+)/i)
+      if (srcsetMatch) {
+        imageUrl = decodeURIComponent(srcsetMatch[1])
       }
     }
     
-    // Pattern 3: Try to find direct asset URL
+    // Pattern 4: Try to find direct asset URL
     if (!imageUrl) {
       const assetMatch = cardContent.match(/(https:\/\/assets\.bileto\.sympla\.com\.br[^"'\s]+)/i)
       imageUrl = assetMatch ? assetMatch[1] : undefined
@@ -481,7 +480,11 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
   const eventsNeedingDetails = valid.filter(e => !e.venue_name || e.title.startsWith('Event '))
   console.log(`\n${eventsNeedingDetails.length} events need more details...`)
   
-  for (const ev of eventsNeedingDetails.slice(0, 50)) {
+  // Only fetch details from bileto.sympla.com.br (www.sympla.com.br/evento/ blocks Node.js fetch)
+  const fetchableDetails = eventsNeedingDetails.filter(e => e.url?.includes('bileto.sympla.com.br'))
+  console.log(`${fetchableDetails.length} events with fetchable detail URLs (bileto.sympla.com.br)`)
+
+  for (const ev of fetchableDetails.slice(0, 50)) {
     try {
       console.log(`Fetching details: ${ev.url}`)
       const html = await fetchHtmlWithRetry(ev.url, headers)
