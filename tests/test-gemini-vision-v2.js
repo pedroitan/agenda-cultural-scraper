@@ -1,43 +1,33 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import fs from 'fs';
+import path from 'path';
+import 'dotenv/config';
 
-const apiKey = process.env.GEMINI_API_KEY
+const apiKey = process.env.GEMINI_API_KEY;
 
-let genAI: GoogleGenerativeAI | null = null
-let model: any = null
-
-if (apiKey) {
-  genAI = new GoogleGenerativeAI(apiKey)
-  model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
-}
-
-export type ExtractedEvent = {
-  title: string
-  date: string // DD/MM/YYYY
-  time: string // HH:MM
-  venue: string
-  price: string // "Grátis" | "Consulte" | "R$ XX"
-  description?: string
+if (!apiKey) {
+  console.error('❌ GEMINI_API_KEY not set in .env file');
+  process.exit(1);
 }
 
 const getCurrentDateContext = () => {
-  const now = new Date()
-  const day = String(now.getDate()).padStart(2, '0')
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const year = now.getFullYear()
-  return `${day}/${month}/${year}`
-}
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const year = now.getFullYear();
+  return `${day}/${month}/${year}`;
+};
 
-function buildPrompt(previousDate?: string): string {
-  return `
+const PROMPT = `
 Analise esta imagem de post do Instagram e extraia TODOS os eventos culturais mencionados.
 
-CONTEXTO TEMPORAL E SEQUENCIAL:
+CONTEXTO TEMPORAL:
 - Data de hoje: ${getCurrentDateContext()}
-- ${previousDate ? `Data do último evento da imagem anterior: ${previousDate}` : 'Esta é a primeira imagem da sequência'}
-- IMPORTANTE: As imagens são processadas em ORDEM CRONOLÓGICA (ordem de captura dos stories)
-- Leia SEQUENCIALMENTE: coluna esquerda → coluna direita → próxima imagem
-- Se NÃO houver novo cabeçalho de data, continue com a data anterior
-- Cabeçalhos de data indicam mudança de dia
+- Eventos geralmente ocorrem no FUTURO PRÓXIMO ou presente (hoje, amanhã, próximos dias)
+- Se hoje é 01/02/2026 (sábado):
+  * "30/01" = sexta-feira (ontem)
+  * "31/01" = sábado (hoje, mas pode ser referência ao dia anterior se já passou)
+  * "01/02" = domingo (amanhã)
+- Use a data de HOJE como referência principal para interpretar as datas
 
 ATENÇÃO ESPECIAL AOS CABEÇALHOS DE DATA E LAYOUT:
 - A imagem tem CABEÇALHOS DE DATA em DESTAQUE com formato: "SEXTA-FEIRA (30/01)", "SÁBADO (31/01)", "DOMINGO (01/02)"
@@ -134,55 +124,123 @@ Exemplo de resposta:
     "price": "Grátis"
   }
 ]
-`.trim()
-}
+`.trim();
 
-export async function extractEventsFromImage(
-  imageBuffer: Buffer,
-  mimeType: string = 'image/jpeg',
-  previousDate?: string // Data do último evento da imagem anterior (DD/MM/YYYY)
-): Promise<ExtractedEvent[]> {
-  if (!model) {
-    console.log('  ⚠️  Gemini API not configured')
-    return []
-  }
+async function testImage(imagePath) {
+  console.log(`\n${'='.repeat(80)}`);
+  console.log(`📸 Testing: ${path.basename(imagePath)}`);
+  console.log('='.repeat(80));
 
   try {
-    const prompt = buildPrompt(previousDate)
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: imageBuffer.toString('base64'),
-          mimeType,
-        },
+    // Read image file
+    const imageBuffer = fs.readFileSync(imagePath);
+    const ext = path.extname(imagePath).toLowerCase();
+    const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
+
+    console.log(`📊 Image size: ${(imageBuffer.length / 1024).toFixed(2)} KB`);
+    console.log(`📋 MIME type: ${mimeType}`);
+    console.log(`\n🤖 Analyzing with Gemini Vision (API v1)...`);
+
+    // Call Gemini API v1 directly
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-    ])
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: PROMPT },
+            {
+              inline_data: {
+                mime_type: mimeType,
+                data: imageBuffer.toString('base64')
+              }
+            }
+          ]
+        }]
+      })
+    });
 
-    const response = await result.response
-    const text = response.text()
+    const data = await response.json();
 
-    // Extract JSON from response (may have markdown code blocks)
-    let jsonText = text.trim()
+    if (!response.ok) {
+      console.log(`\n❌ API Error: ${data.error?.message || 'Unknown error'}`);
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!text) {
+      console.log('\n❌ No text in response');
+      console.log(JSON.stringify(data, null, 2));
+      return;
+    }
+
+    console.log(`\n📝 Raw Response:`);
+    console.log(text);
+
+    // Extract JSON from response
+    let jsonText = text.trim();
     
     // Remove markdown code blocks if present
     if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/```json?\n?/g, '').replace(/```\n?$/g, '').trim()
+      jsonText = jsonText.replace(/```json?\n?/g, '').replace(/```\n?$/g, '').trim();
     }
 
     // Parse JSON
-    const events = JSON.parse(jsonText)
+    const events = JSON.parse(jsonText);
 
     if (!Array.isArray(events)) {
-      console.log('  ⚠️  Response is not an array')
-      return []
+      console.log('\n❌ Response is not an array');
+      return;
     }
 
-    console.log(`  ✅ Extracted ${events.length} event(s) from image`)
-    return events
+    console.log(`\n✅ Extracted ${events.length} event(s):`);
+    console.log(JSON.stringify(events, null, 2));
 
   } catch (err) {
-    console.log(`  ⚠️  Error extracting events: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    return []
+    console.log(`\n❌ Error: ${err.message}`);
   }
 }
+
+async function main() {
+  const postsDir = path.join(process.cwd(), 'postref');
+
+  console.log('🖼️  Gemini Vision Test - Instagram Stories (API v1)\n');
+  console.log(`📁 Looking for images in: ${postsDir}\n`);
+
+  if (!fs.existsSync(postsDir)) {
+    console.log('❌ Directory not found');
+    return;
+  }
+
+  const files = fs.readdirSync(postsDir)
+    .filter(f => /\.(jpg|jpeg|png|webp)$/i.test(f))
+    .map(f => path.join(postsDir, f));
+
+  if (files.length === 0) {
+    console.log('❌ No images found in postref/ directory');
+    return;
+  }
+
+  console.log(`✅ Found ${files.length} image(s)\n`);
+
+  for (const file of files) {
+    await testImage(file);
+    
+    if (files.indexOf(file) < files.length - 1) {
+      console.log('\n⏳ Waiting 2 seconds before next image...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  console.log(`\n${'='.repeat(80)}`);
+  console.log('✅ Test complete!');
+  console.log('='.repeat(80));
+}
+
+main().catch(console.error);

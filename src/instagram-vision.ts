@@ -58,6 +58,7 @@ export async function runInstagramVisionScrape(
   let invalid_count = 0
   let items_fetched = 0
   const seenIds = new Set<string>()
+  let lastEventDate: string | undefined // Track last date for sequential processing
 
   console.log(`Scraping Instagram @${instagramHandle} with Gemini Vision...`)
 
@@ -94,10 +95,20 @@ export async function runInstagramVisionScrape(
 
         // Click to open post
         await post.click()
-        await page.waitForTimeout(2000)
+        await page.waitForTimeout(3000)
 
-        // Find image in the modal
-        const imageElement = await page.$('article img[src*="scontent"]')
+        // Try multiple selectors to find image
+        let imageElement = await page.$('article img[src*="scontent"]')
+        if (!imageElement) {
+          imageElement = await page.$('img[src*="cdninstagram"]')
+        }
+        if (!imageElement) {
+          imageElement = await page.$('article img[alt]')
+        }
+        if (!imageElement) {
+          imageElement = await page.$('div[role="dialog"] img')
+        }
+
         if (!imageElement) {
           console.log('  ⚠️  No image found in post')
           await page.keyboard.press('Escape')
@@ -107,12 +118,14 @@ export async function runInstagramVisionScrape(
 
         // Get image URL
         const imageUrl = await imageElement.getAttribute('src')
-        if (!imageUrl) {
-          console.log('  ⚠️  No image URL found')
+        if (!imageUrl || !imageUrl.startsWith('http')) {
+          console.log('  ⚠️  No valid image URL found')
           await page.keyboard.press('Escape')
           await page.waitForTimeout(1000)
           continue
         }
+
+        console.log(`  📷 Image URL: ${imageUrl.substring(0, 80)}...`)
 
         console.log(`  📥 Downloading image...`)
 
@@ -129,9 +142,12 @@ export async function runInstagramVisionScrape(
         const contentType = response.headers()['content-type'] || 'image/jpeg'
 
         console.log(`  🤖 Analyzing image with Gemini Vision...`)
+        if (lastEventDate) {
+          console.log(`  📅 Previous date context: ${lastEventDate}`)
+        }
 
-        // Extract events from image using Gemini Vision
-        const extractedEvents = await extractEventsFromImage(imageBuffer, contentType)
+        // Extract events from image using Gemini Vision (with date context)
+        const extractedEvents = await extractEventsFromImage(imageBuffer, contentType, lastEventDate)
 
         if (extractedEvents.length === 0) {
           console.log('  ℹ️  No events found in this image')
@@ -139,6 +155,8 @@ export async function runInstagramVisionScrape(
           await page.waitForTimeout(1000)
           continue
         }
+
+        console.log(`  ✅ Extracted ${extractedEvents.length} events`)
 
         // Process each extracted event
         for (const ev of extractedEvents) {
@@ -173,6 +191,9 @@ export async function runInstagramVisionScrape(
 
           items_fetched++
           console.log(`  ✅ Event: ${ev.title}`)
+          
+          // Update lastEventDate for next image
+          lastEventDate = ev.date
         }
 
         // Close modal

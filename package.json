@@ -13,6 +13,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.39.7",
+    "apify-client": "^2.22.3",
     "dotenv": "^16.4.5",
     "playwright": "^1.40.0",
     "zod": "^3.23.8"
