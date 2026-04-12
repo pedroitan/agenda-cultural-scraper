@@ -150,7 +150,7 @@ function extractEventFromHtml(html: string, eventId: string, url: string, input:
       const day = dateMatch[1].padStart(2, '0')
       const month = months[dateMatch[2].toLowerCase().slice(0, 3)]
       const year = dateMatch[3] || new Date().getFullYear().toString()
-      startDatetime = `${year}-${month}-${day}T19:00:00`
+      startDatetime = `${year}-${month}-${day}T00:00:00` // 00:00 = time not available in source
     }
   } else {
     return null // No date found - skip event rather than fabricating a date

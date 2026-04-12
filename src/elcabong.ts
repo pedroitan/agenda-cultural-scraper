@@ -23,10 +23,11 @@ function parseElCabongDate(dateStr: string): string | null {
   const day = match[1].padStart(2, '0')
   const month = match[2].padStart(2, '0')
   const year = match[3]
-  const hour = match[4] ? match[4].padStart(2, '0') : '20'
+  const hour = match[4] ? match[4].padStart(2, '0') : null // null = time not available
   const minute = match[5] || '00'
+  const timeStr = hour ? `${hour}:${minute}:00` : '00:00:00'
 
-  return `${year}-${month}-${day}T${hour}:${minute}:00`
+  return `${year}-${month}-${day}T${timeStr}`
 }
 
 export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongScrapeResult> {
