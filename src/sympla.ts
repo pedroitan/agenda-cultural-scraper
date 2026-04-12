@@ -250,12 +250,12 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
       const isFree = ev.is_free || ev.isFree || ev.free || false
       const price = ev.price || ev.price_text
       
-      if (id && title && url) {
+      if (id && title && url && startDate) {
         events.push({
           source: input.source,
           external_id: String(id),
           title,
-          start_datetime: startDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          start_datetime: startDate,
           city: input.city,
           venue_name: venue,
           image_url: image,
@@ -341,13 +341,11 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
       if (idMatch) {
         // Parse date string like "Sexta, 24 de Abr às 19:00"
         let startDatetime: string
-        if (dateStr) {
-          const parsed = parseBrazilianDate(dateStr)
-          startDatetime = parsed || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-          console.log(`    Date parsed: "${dateStr}" -> ${startDatetime}`)
-        } else {
-          startDatetime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-        }
+        if (!dateStr) continue // skip events with no parseable date
+        const parsed = parseBrazilianDate(dateStr)
+        if (!parsed) continue // skip if date string couldn't be parsed
+        startDatetime = parsed
+        console.log(`    Date parsed: "${dateStr}" -> ${startDatetime}`)
         
         events.push({
           source: input.source,
