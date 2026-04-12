@@ -230,7 +230,7 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         image_url: finalImageUrl || undefined,
         category: 'Shows e Festas',
         is_free: false,
-        url: ev.url || 'https://elcabong.com.br/agenda/',
+        url: ev.url!, // always non-null: link is validated before pushing to results
         raw_payload: ev,
       })
       items_fetched++

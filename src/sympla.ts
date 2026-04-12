@@ -35,11 +35,24 @@ function parseBrazilianDate(dateStr: string): string | null {
   const month = months[monthKey]
   if (!month) return null
   
-  const year = match[3] || new Date().getFullYear().toString()
-  const hour = match[4] ? match[4].padStart(2, '0') : '19'
+  // If no year in string, infer: if parsed month is before current month, assume next year
+  let year = match[3]
+  if (!year) {
+    const currentDate = new Date()
+    const parsedMonth = parseInt(months[match[2].toLowerCase().slice(0, 3)], 10)
+    const parsedDay = parseInt(match[1], 10)
+    const tempDate = new Date(currentDate.getFullYear(), parsedMonth - 1, parsedDay)
+    // If the date is more than 7 days in the past, assume next year
+    year = tempDate < new Date(currentDate.getTime() - 7 * 24 * 60 * 60 * 1000)
+      ? String(currentDate.getFullYear() + 1)
+      : String(currentDate.getFullYear())
+  }
+  const hour = match[4] ? match[4].padStart(2, '0') : null // null = no time known
   const minute = match[5] || '00'
   
-  return `${year}-${month}-${day}T${hour}:${minute}:00`
+  // If no time in the source, store at 00:00 to signal "time unknown" (not a real time)
+  const timeStr = hour ? `${hour}:${minute}:00` : '00:00:00'
+  return `${year}-${month}-${day}T${timeStr}`
 }
 
 async function fetchHtmlWithRetry(url: string, headers: Record<string, string>) {
@@ -140,10 +153,7 @@ function extractEventFromHtml(html: string, eventId: string, url: string, input:
       startDatetime = `${year}-${month}-${day}T19:00:00`
     }
   } else {
-    // Default to 30 days from now if no date found
-    const futureDate = new Date()
-    futureDate.setDate(futureDate.getDate() + 30)
-    startDatetime = futureDate.toISOString()
+    return null // No date found - skip event rather than fabricating a date
   }
   
   return {
