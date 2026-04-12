@@ -21,18 +21,17 @@ export async function uploadImageToSupabase(
   }
 
   try {
-    // Generate filename first to check if already uploaded
-    const filepath = `events/event-${eventId}.jpg`
-
     // Check if image already exists in Supabase - skip upload if it does
     const { data: existingFile } = await supabase.storage
       .from('event-images')
       .list('events', { search: `event-${eventId}` })
 
     if (existingFile && existingFile.length > 0) {
+      // Use the actual filename found (preserves real extension: .jpg, .webp, .png, etc.)
+      const actualFilepath = `events/${existingFile[0].name}`
       const { data: urlData } = supabase.storage
         .from('event-images')
-        .getPublicUrl(filepath)
+        .getPublicUrl(actualFilepath)
       return urlData.publicUrl
     }
 
