@@ -355,7 +355,6 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
         const parsed = parseBrazilianDate(dateStr)
         if (!parsed) continue // skip if date string couldn't be parsed
         startDatetime = parsed
-        console.log(`    Date parsed: "${dateStr}" -> ${startDatetime}`)
         
         events.push({
           source: input.source,
