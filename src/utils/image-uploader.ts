@@ -17,7 +17,7 @@ const DOWNLOAD_HEADERS = {
 }
 
 async function downloadImage(imageUrl: string, page?: Page): Promise<{ buffer: Buffer; contentType: string } | null> {
-  // Try fetch first (faster)
+  // Try fetch first
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 15000)
@@ -28,7 +28,10 @@ async function downloadImage(imageUrl: string, page?: Page): Promise<{ buffer: B
       const contentType = res.headers.get('content-type') || 'image/jpeg'
       return { buffer, contentType }
     }
-  } catch {}
+    console.log(`    fetch: HTTP ${res.status} ${res.statusText}`)
+  } catch (err) {
+    console.log(`    fetch: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
+  }
 
   // Fallback: try via Playwright browser context
   if (page) {
@@ -39,7 +42,10 @@ async function downloadImage(imageUrl: string, page?: Page): Promise<{ buffer: B
         const contentType = res.headers()['content-type'] || 'image/jpeg'
         return { buffer, contentType }
       }
-    } catch {}
+      console.log(`    playwright: HTTP ${res.status()}`)
+    } catch (err) {
+      console.log(`    playwright: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   return null
