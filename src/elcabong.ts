@@ -1,6 +1,6 @@
 import { chromium } from 'playwright'
 import type { EventInput, ScraperInput } from './types.js'
-import { uploadImageToSupabase } from './utils/image-uploader.js'
+import { uploadImageBuffer } from './utils/image-uploader.js'
 
 type ElCabongScrapeResult = {
   valid: EventInput[]
@@ -196,39 +196,79 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
 
     console.log(`  Found ${events.length} events on page`)
 
+    // Parse all events (no I/O)
+    type ParsedEvent = { externalId: string; title: string; startDatetime: string; location: string; url: string; imageUrl: string | null; raw: typeof events[0] }
+    const parsed: ParsedEvent[] = []
     for (const ev of events) {
       if (!ev.title || !ev.date) continue
-
       const dateTimeStr = ev.time ? `${ev.date} - ${ev.time}` : ev.date
       const startDatetime = parseElCabongDate(dateTimeStr)
-      if (!startDatetime) {
-        invalid_count++
-        continue
-      }
-
+      if (!startDatetime) { invalid_count++; continue }
       const externalId = `elcabong-${Buffer.from(ev.title + ev.date).toString('base64').slice(0, 20)}`
-
       if (seenIds.has(externalId)) continue
       seenIds.add(externalId)
+      parsed.push({ externalId, title: ev.title, startDatetime, location: ev.location!, url: ev.url!, imageUrl: ev.imageUrl, raw: ev })
+    }
 
-      // Upload image to Supabase Storage (fetch first, Playwright page.request as fallback)
+    // Download images via page.evaluate(fetch) — this reuses the browser's
+    // existing HTTP/2 connection, bypassing the server's IP ban on new TCP
+    // connections that occurs after heavy Playwright activity (~30+ clicks).
+    console.log(`  Downloading ${parsed.length} images via browser context...`)
+    const imageData = new Map<string, { base64: string; contentType: string }>()
+    for (const ev of parsed) {
+      if (!ev.imageUrl || !ev.imageUrl.includes('elcabong.com.br')) continue
+      try {
+        const result = await page.evaluate(async (url: string) => {
+          try {
+            const res = await fetch(url)
+            if (!res.ok) return { ok: false as const, error: `HTTP ${res.status}` }
+            const buf = await res.arrayBuffer()
+            const ct = res.headers.get('content-type') || 'image/jpeg'
+            const bytes = new Uint8Array(buf)
+            let binary = ''
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+            return { ok: true as const, base64: btoa(binary), contentType: ct }
+          } catch (e: any) {
+            return { ok: false as const, error: e.message }
+          }
+        }, ev.imageUrl)
+
+        if (result.ok) {
+          imageData.set(ev.externalId, { base64: result.base64, contentType: result.contentType })
+        } else {
+          console.log(`  ⚠️  Image download failed for ${ev.externalId}: ${result.error}`)
+        }
+      } catch (err) {
+        console.log(`  ⚠️  page.evaluate error for ${ev.externalId}: ${err instanceof Error ? err.message : err}`)
+      }
+    }
+    console.log(`  Downloaded ${imageData.size}/${parsed.length} images`)
+
+    // Close browser — all image data is in memory
+    await browser.close()
+    console.log(`  Browser closed. Uploading to Supabase...`)
+
+    for (const ev of parsed) {
+      // Upload image buffer to Supabase Storage — no fallback to El Cabong URL
       let finalImageUrl: string | null = null
-      if (ev.imageUrl && ev.imageUrl.includes('elcabong.com.br')) {
-        finalImageUrl = await uploadImageToSupabase(ev.imageUrl, externalId, page)
+      const img = imageData.get(ev.externalId)
+      if (img) {
+        const buffer = Buffer.from(img.base64, 'base64')
+        finalImageUrl = await uploadImageBuffer(buffer, img.contentType, ev.externalId)
       }
 
       valid.push({
         source: 'elcabong',
-        external_id: externalId,
+        external_id: ev.externalId,
         title: ev.title,
-        start_datetime: startDatetime,
+        start_datetime: ev.startDatetime,
         city: input.city,
         venue_name: ev.location || undefined,
         image_url: finalImageUrl || undefined,
         category: 'Shows e Festas',
         is_free: false,
-        url: ev.url!,
-        raw_payload: ev,
+        url: ev.url,
+        raw_payload: ev.raw,
       })
       items_fetched++
     }
@@ -236,7 +276,7 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     console.error('Error scraping El Cabong:', err)
     invalid_count++
   } finally {
-    await browser.close()
+    if (browser.isConnected()) await browser.close()
   }
 
   console.log(`\nEl Cabong scrape complete: ${valid.length} valid, ${invalid_count} invalid`)
