@@ -17,8 +17,8 @@ try {
   });
 } catch {}
 
-const SUPABASE_URL = env.SUPABASE_URL || '';
-const SUPABASE_KEY = env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_URL = process.env.SUPABASE_URL || env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || '';
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   console.error('❌ SUPABASE_URL / SUPABASE_SERVICE_KEY not set in .env');
