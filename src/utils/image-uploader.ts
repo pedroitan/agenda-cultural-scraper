@@ -29,8 +29,9 @@ async function downloadImage(imageUrl: string, page?: Page): Promise<{ buffer: B
       return { buffer, contentType }
     }
     console.log(`    fetch: HTTP ${res.status} ${res.statusText}`)
-  } catch (err) {
-    console.log(`    fetch: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`)
+  } catch (err: any) {
+    const cause = err?.cause ? ` → cause: ${err.cause?.code || err.cause?.message || err.cause}` : ''
+    console.log(`    fetch: ${err instanceof Error ? `${err.name}: ${err.message}${cause}` : String(err)}`)
   }
 
   // Fallback: try via Playwright browser context
@@ -48,6 +49,52 @@ async function downloadImage(imageUrl: string, page?: Page): Promise<{ buffer: B
     }
   }
 
+  return null
+}
+
+export async function uploadImageBuffer(
+  buffer: Buffer,
+  contentType: string,
+  eventId: string
+): Promise<string | null> {
+  if (!supabase) return null
+
+  // Check if already exists
+  try {
+    const { data: existingFile } = await supabase.storage
+      .from('event-images')
+      .list('events', { search: `event-${eventId}` })
+    if (existingFile && existingFile.length > 0) {
+      const { data: urlData } = supabase.storage
+        .from('event-images')
+        .getPublicUrl(`events/${existingFile[0].name}`)
+      return urlData.publicUrl
+    }
+  } catch {}
+
+  const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'
+  const finalFilepath = `events/event-${eventId}.${ext}`
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { error } = await supabase.storage
+        .from('event-images')
+        .upload(finalFilepath, buffer, { contentType, upsert: true })
+      if (!error) {
+        const { data: urlData } = supabase.storage
+          .from('event-images')
+          .getPublicUrl(finalFilepath)
+        console.log(`  ✅ Image uploaded to Supabase`)
+        return urlData.publicUrl
+      }
+      console.log(`  ⚠️  Upload attempt ${attempt}/3 failed: ${error.message}`)
+    } catch (err) {
+      console.log(`  ⚠️  Upload attempt ${attempt}/3 threw: ${err instanceof Error ? err.message : err}`)
+    }
+    await new Promise(r => setTimeout(r, 500 * attempt))
+  }
+
+  console.log(`  ❌ Upload failed after 3 attempts: ${finalFilepath}`)
   return null
 }
 
