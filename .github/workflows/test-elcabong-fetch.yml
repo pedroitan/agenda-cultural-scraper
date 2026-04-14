@@ -14,53 +14,91 @@ jobs:
       - name: Show runner IP
         run: curl -s https://api.ipify.org && echo ""
 
-      - name: curl test (verbose headers)
-        run: |
-          curl -v --max-time 15 \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            -H "Referer: https://elcabong.com.br/" \
-            -o /dev/null \
-            "https://elcabong.com.br/wp-content/uploads/2026/04/Mariella-by-Jaguar-Carvalho-2.jpg" \
-            2>&1 | head -60
-
-      - name: curl test (direct, no headers)
-        run: |
-          curl -I --max-time 15 \
-            "https://elcabong.com.br/wp-content/uploads/2026/04/Mariella-by-Jaguar-Carvalho-2.jpg" \
-            2>&1
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Node.js fetch test
-        run: |
-          node --input-type=module << 'EOF'
-          const url = 'https://elcabong.com.br/wp-content/uploads/2026/04/Mariella-by-Jaguar-Carvalho-2.jpg'
-          const urls = [
-            url,
-            'https://elcabong.com.br/wp-content/uploads/2025/01/oz-favoritos.jpg',
-            'https://elcabong.com.br/wp-content/uploads/2024/12/Leandro-Tigrao-2.jpg',
-            'https://httpbin.org/image/jpeg', // baseline: known public image
-          ]
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromium
 
-          for (const u of urls) {
-            const start = Date.now()
+      - name: Test - simulate scraper then download images
+        run: |
+          node --input-type=module << 'SCRIPT'
+          import { chromium } from 'playwright';
+
+          const IMG_URL = 'https://elcabong.com.br/wp-content/uploads/2026/04/Mariella-by-Jaguar-Carvalho-2.jpg';
+          const HEADERS = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://elcabong.com.br/',
+            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+          };
+
+          async function tryFetch(label) {
+            const start = Date.now();
             try {
-              const res = await fetch(u, {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                  'Referer': 'https://elcabong.com.br/',
-                  'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-                },
-                signal: AbortSignal.timeout(15000),
-              })
-              const buf = await res.arrayBuffer()
-              console.log(`✅ ${u.split('/').pop()} — HTTP ${res.status}, ${(buf.byteLength/1024).toFixed(1)}KB in ${Date.now()-start}ms`)
+              const res = await fetch(IMG_URL, { headers: HEADERS, signal: AbortSignal.timeout(15000) });
+              const buf = await res.arrayBuffer();
+              console.log(`  ✅ ${label}: HTTP ${res.status}, ${(buf.byteLength/1024).toFixed(1)}KB in ${Date.now()-start}ms`);
+              return true;
             } catch (err) {
-              console.log(`❌ ${u.split('/').pop()} — ${err.name}: ${err.message} (${Date.now()-start}ms)`)
-              if (err.cause) console.log(`   cause: ${err.cause}`)
+              const cause = err?.cause?.code || err?.cause?.message || '';
+              console.log(`  ❌ ${label}: ${err.name}: ${err.message}${cause ? ' → ' + cause : ''} (${Date.now()-start}ms)`);
+              return false;
             }
           }
-          EOF
+
+          // ── STEP 1: Baseline — fetch BEFORE any Playwright activity
+          console.log('\n══ STEP 1: Fetch image BEFORE Playwright ══');
+          await tryFetch('before-playwright');
+
+          // ── STEP 2: Run Playwright (simulate full El Cabong scrape)
+          console.log('\n══ STEP 2: Simulate Playwright scrape (click load-more) ══');
+          const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+          const page = await browser.newPage({ userAgent: HEADERS['User-Agent'] });
+          await page.goto('https://elcabong.com.br/agenda/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await page.waitForTimeout(2000);
+
+          let clicks = 0;
+          for (let i = 0; i < 50; i++) {
+            const btn = page.locator('#load_more_events');
+            if (await btn.count() === 0) break;
+            const prevCount = await page.locator('.wpem-event-box-col').count();
+            try { await btn.click({ timeout: 5000 }); } catch { 
+              await page.evaluate(() => { (document.querySelector('#load_more_events'))?.click(); });
+            }
+            await page.waitForTimeout(2000);
+            const newCount = await page.locator('.wpem-event-box-col').count();
+            if (newCount <= prevCount) break;
+            clicks++;
+            if (clicks % 10 === 0) console.log(`  Clicked ${clicks} times, ${newCount} events`);
+          }
+          const total = await page.locator('.wpem-event-box-col').count();
+          console.log(`  Done: ${clicks} clicks, ${total} events`);
+
+          // ── STEP 3: Fetch IMMEDIATELY after scrape (browser still open)
+          console.log('\n══ STEP 3: Fetch image RIGHT AFTER scrape (browser open) ══');
+          await tryFetch('after-scrape-browser-open');
+
+          // ── STEP 4: Fetch via Playwright context
+          console.log('\n══ STEP 4: page.request.get (browser open) ══');
+          try {
+            const res = await page.request.get(IMG_URL, { timeout: 15000 });
+            console.log(`  ${res.ok() ? '✅' : '❌'} playwright: HTTP ${res.status()}, ${((await res.body()).byteLength/1024).toFixed(1)}KB`);
+          } catch (err) { console.log(`  ❌ playwright: ${err.message}`); }
+
+          // ── STEP 5: Close browser, fetch immediately
+          await browser.close();
+          console.log('\n══ STEP 5: Fetch image RIGHT AFTER browser.close() ══');
+          await tryFetch('0s-after-close');
+
+          // ── STEP 6: Cooldown tests at different intervals
+          for (const secs of [15, 30, 45, 60]) {
+            console.log(`\n══ STEP 6.${secs}: Fetch after ${secs}s cooldown ══`);
+            await new Promise(r => setTimeout(r, secs * 1000));
+            const ok = await tryFetch(`${secs}s-cooldown`);
+            if (ok) { console.log(`\n🎯 Server unblocked after ${secs}s cooldown!`); break; }
+          }
+
+          console.log('\n✅ Test complete.');
+          SCRIPT
