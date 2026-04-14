@@ -84,6 +84,31 @@ jobs:
           }
 
           if (!blocked) console.log('\n✅ Fetch never blocked during clicking!');
+
+          // ── KEY TEST: can page.evaluate(fetch) bypass the IP ban?
+          console.log('\n══ page.evaluate(fetch) — reuses browser HTTP/2 connection ══');
+          try {
+            const result = await page.evaluate(async (url) => {
+              try {
+                const res = await fetch(url);
+                if (!res.ok) return { ok: false, status: res.status, size: 0 };
+                const buf = await res.arrayBuffer();
+                return { ok: true, status: res.status, size: buf.byteLength };
+              } catch (e) {
+                return { ok: false, status: 0, size: 0, error: e.message };
+              }
+            }, IMG_URL);
+            if (result.ok) {
+              console.log(`  ✅ page.evaluate(fetch): HTTP ${result.status}, ${(result.size/1024).toFixed(1)}KB`);
+            } else {
+              console.log(`  ❌ page.evaluate(fetch): ${JSON.stringify(result)}`);
+            }
+          } catch (err) { console.log(`  ❌ page.evaluate error: ${err.message}`); }
+
+          // Also test Node.js fetch to confirm it's still blocked
+          console.log('\n══ Node.js fetch (control — should still be blocked) ══');
+          await tryFetch('node-fetch-after-all-clicks');
+
           await browser.close();
           console.log('\n✅ Test complete.');
           SCRIPT
