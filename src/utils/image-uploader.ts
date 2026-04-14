@@ -10,6 +10,41 @@ if (supabaseKey) {
   supabase = createClient(supabaseUrl, supabaseKey)
 }
 
+const DOWNLOAD_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Referer': 'https://elcabong.com.br/',
+  'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+}
+
+async function downloadImage(imageUrl: string, page?: Page): Promise<{ buffer: Buffer; contentType: string } | null> {
+  // Try fetch first (faster)
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000)
+    const res = await fetch(imageUrl, { headers: DOWNLOAD_HEADERS, signal: controller.signal })
+    clearTimeout(timer)
+    if (res.ok) {
+      const buffer = Buffer.from(await res.arrayBuffer())
+      const contentType = res.headers.get('content-type') || 'image/jpeg'
+      return { buffer, contentType }
+    }
+  } catch {}
+
+  // Fallback: try via Playwright browser context
+  if (page) {
+    try {
+      const res = await page.request.get(imageUrl, { timeout: 15000 })
+      if (res.ok()) {
+        const buffer = await res.body()
+        const contentType = res.headers()['content-type'] || 'image/jpeg'
+        return { buffer, contentType }
+      }
+    } catch {}
+  }
+
+  return null
+}
+
 export async function uploadImageToSupabase(
   imageUrl: string,
   eventId: string,
@@ -17,93 +52,67 @@ export async function uploadImageToSupabase(
 ): Promise<string | null> {
   if (!supabase) {
     console.log('  ⚠️  Supabase not configured, skipping image upload')
-    return imageUrl // Return original URL if Supabase not configured
+    return null
   }
 
+  // Check if image already exists in Supabase
   try {
-    // Check if image already exists in Supabase - skip upload if it does
     const { data: existingFile } = await supabase.storage
       .from('event-images')
       .list('events', { search: `event-${eventId}` })
 
     if (existingFile && existingFile.length > 0) {
-      // Use the actual filename found (preserves real extension: .jpg, .webp, .png, etc.)
-      const actualFilepath = `events/${existingFile[0].name}`
       const { data: urlData } = supabase.storage
         .from('event-images')
-        .getPublicUrl(actualFilepath)
+        .getPublicUrl(`events/${existingFile[0].name}`)
       return urlData.publicUrl
     }
-
-    let buffer: Buffer
-    let contentType = 'image/jpeg'
-
-    // Download via fetch with browser-like headers (5s timeout)
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 5000)
-
-    let fetchResponse: Response | null = null
-    try {
-      fetchResponse = await fetch(imageUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Referer': 'https://elcabong.com.br/',
-          'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-        },
-      })
-    } finally {
-      clearTimeout(timeoutId)
-    }
-
-    // If fetch failed and Playwright page available, try via browser context
-    if ((!fetchResponse || !fetchResponse.ok) && page) {
-      try {
-        const playwrightResponse = await page.request.get(imageUrl, { timeout: 5000 })
-        if (playwrightResponse.ok()) {
-          buffer = await playwrightResponse.body()
-          contentType = playwrightResponse.headers()['content-type'] || 'image/jpeg'
-        } else {
-          return imageUrl
-        }
-      } catch {
-        return imageUrl
-      }
-    } else if (!fetchResponse || !fetchResponse.ok) {
-      return imageUrl
-    } else {
-      const arrayBuffer = await fetchResponse.arrayBuffer()
-      buffer = Buffer.from(arrayBuffer)
-      contentType = fetchResponse.headers.get('content-type') || 'image/jpeg'
-    }
-
-    // Generate filename
-    const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'
-    const finalFilepath = `events/event-${eventId}.${ext}`
-
-    // Upload to Supabase Storage (upsert: false = nunca re-faz upload)
-    const { error: uploadError } = await supabase.storage
-      .from('event-images')
-      .upload(finalFilepath, buffer, {
-        contentType,
-        upsert: false,
-      })
-
-    if (uploadError) {
-      console.log(`  ⚠️  Upload failed: ${uploadError.message}`)
-      return imageUrl // Return original URL on failure
-    }
-
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('event-images')
-      .getPublicUrl(finalFilepath)
-
-    console.log(`  ✅ Image uploaded to Supabase`)
-    return urlData.publicUrl
-
   } catch (err) {
-    console.log(`  ⚠️  Error uploading image: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    return imageUrl // Return original URL on error
+    console.log(`  ⚠️  Storage list failed: ${err instanceof Error ? err.message : err}`)
+    // Continue to attempt download+upload anyway
   }
+
+  // Download image (up to 3 attempts)
+  let downloaded: { buffer: Buffer; contentType: string } | null = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    downloaded = await downloadImage(imageUrl, page)
+    if (downloaded) break
+    console.log(`  ⚠️  Download attempt ${attempt}/3 failed, retrying...`)
+    await new Promise(r => setTimeout(r, 500 * attempt))
+  }
+
+  if (!downloaded) {
+    console.log(`  ❌ Image download failed after 3 attempts: ${imageUrl}`)
+    return null
+  }
+
+  const { buffer, contentType } = downloaded
+  const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg').replace('webp', 'webp') || 'jpg'
+  const finalFilepath = `events/event-${eventId}.${ext}`
+
+  // Upload to Supabase Storage (up to 3 attempts)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { error } = await supabase.storage
+        .from('event-images')
+        .upload(finalFilepath, buffer, { contentType, upsert: true })
+
+      if (!error) {
+        const { data: urlData } = supabase.storage
+          .from('event-images')
+          .getPublicUrl(finalFilepath)
+        console.log(`  ✅ Image uploaded to Supabase`)
+        return urlData.publicUrl
+      }
+
+      console.log(`  ⚠️  Upload attempt ${attempt}/3 failed: ${error.message}`)
+    } catch (err) {
+      console.log(`  ⚠️  Upload attempt ${attempt}/3 threw: ${err instanceof Error ? err.message : err}`)
+    }
+
+    await new Promise(r => setTimeout(r, 500 * attempt))
+  }
+
+  console.log(`  ❌ Image upload failed after 3 attempts: ${finalFilepath}`)
+  return null
 }

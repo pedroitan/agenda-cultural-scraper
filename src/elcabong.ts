@@ -212,13 +212,10 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
       if (seenIds.has(externalId)) continue
       seenIds.add(externalId)
 
-      // Upload image once to Supabase - skips if already uploaded (no re-upload)
-      let finalImageUrl = ev.imageUrl
+      // Always upload image to Supabase Storage — never use original El Cabong URL
+      let finalImageUrl: string | null = null
       if (ev.imageUrl && ev.imageUrl.includes('elcabong.com.br')) {
-        const uploadedUrl = await uploadImageToSupabase(ev.imageUrl, externalId, page)
-        if (uploadedUrl && uploadedUrl !== ev.imageUrl) {
-          finalImageUrl = uploadedUrl
-        }
+        finalImageUrl = await uploadImageToSupabase(ev.imageUrl, externalId, page)
       }
 
       valid.push({
