@@ -25,7 +25,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Test - simulate scraper then download images
+      - name: Test - find when IP ban kicks in during clicking
         run: |
           node --input-type=module << 'SCRIPT'
           import { chromium } from 'playwright';
@@ -40,68 +40,50 @@ jobs:
           async function tryFetch(label) {
             const start = Date.now();
             try {
-              const res = await fetch(IMG_URL, { headers: HEADERS, signal: AbortSignal.timeout(15000) });
+              const res = await fetch(IMG_URL, { headers: HEADERS, signal: AbortSignal.timeout(10000) });
               const buf = await res.arrayBuffer();
               console.log(`  ✅ ${label}: HTTP ${res.status}, ${(buf.byteLength/1024).toFixed(1)}KB in ${Date.now()-start}ms`);
               return true;
             } catch (err) {
               const cause = err?.cause?.code || err?.cause?.message || '';
-              console.log(`  ❌ ${label}: ${err.name}: ${err.message}${cause ? ' → ' + cause : ''} (${Date.now()-start}ms)`);
+              console.log(`  ❌ ${label}: ${err.message}${cause ? ' → ' + cause : ''} (${Date.now()-start}ms)`);
               return false;
             }
           }
 
-          // ── STEP 1: Baseline — fetch BEFORE any Playwright activity
-          console.log('\n══ STEP 1: Fetch image BEFORE Playwright ══');
-          await tryFetch('before-playwright');
+          console.log('══ Goal: find after how many clicks fetch stops working ══\n');
 
-          // ── STEP 2: Run Playwright (simulate full El Cabong scrape)
-          console.log('\n══ STEP 2: Simulate Playwright scrape (click load-more) ══');
           const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
           const page = await browser.newPage({ userAgent: HEADERS['User-Agent'] });
           await page.goto('https://elcabong.com.br/agenda/', { waitUntil: 'domcontentloaded', timeout: 30000 });
           await page.waitForTimeout(2000);
 
-          let clicks = 0;
-          for (let i = 0; i < 50; i++) {
+          // Test fetch before any clicks
+          await tryFetch('after-page-load (0 clicks)');
+
+          let blocked = false;
+          for (let click = 1; click <= 40; click++) {
             const btn = page.locator('#load_more_events');
-            if (await btn.count() === 0) break;
-            const prevCount = await page.locator('.wpem-event-box-col').count();
-            try { await btn.click({ timeout: 5000 }); } catch { 
+            if (await btn.count() === 0) { console.log(`  No more load-more button after ${click-1} clicks`); break; }
+            const prev = await page.locator('.wpem-event-box-col').count();
+            try { await btn.click({ timeout: 5000 }); } catch {
               await page.evaluate(() => { (document.querySelector('#load_more_events'))?.click(); });
             }
             await page.waitForTimeout(2000);
-            const newCount = await page.locator('.wpem-event-box-col').count();
-            if (newCount <= prevCount) break;
-            clicks++;
-            if (clicks % 10 === 0) console.log(`  Clicked ${clicks} times, ${newCount} events`);
+            const curr = await page.locator('.wpem-event-box-col').count();
+            if (curr <= prev) { console.log(`  No new events after click ${click}`); break; }
+
+            // Test fetch every 3 clicks
+            if (click % 3 === 0) {
+              const ok = await tryFetch(`after ${click} clicks (${curr} events)`);
+              if (!ok && !blocked) {
+                blocked = true;
+                console.log(`\n🚫 IP BLOCKED after ${click} clicks (${curr} events)!\n`);
+              }
+            }
           }
-          const total = await page.locator('.wpem-event-box-col').count();
-          console.log(`  Done: ${clicks} clicks, ${total} events`);
 
-          // ── STEP 3: Fetch IMMEDIATELY after scrape (browser still open)
-          console.log('\n══ STEP 3: Fetch image RIGHT AFTER scrape (browser open) ══');
-          await tryFetch('after-scrape-browser-open');
-
-          // ── STEP 4: Fetch via Playwright context
-          console.log('\n══ STEP 4: page.request.get (browser open) ══');
-          try {
-            const res = await page.request.get(IMG_URL, { timeout: 15000 });
-            console.log(`  ${res.ok() ? '✅' : '❌'} playwright: HTTP ${res.status()}, ${((await res.body()).byteLength/1024).toFixed(1)}KB`);
-          } catch (err) { console.log(`  ❌ playwright: ${err.message}`); }
-
-          // ── STEP 5: Close browser, fetch immediately
+          if (!blocked) console.log('\n✅ Fetch never blocked during clicking!');
           await browser.close();
-          console.log('\n══ STEP 5: Fetch image RIGHT AFTER browser.close() ══');
-          await tryFetch('0s-after-close');
-
-          // ── STEP 6: Cooldown tests at different intervals
-          for (const secs of [15, 30, 45, 60]) {
-            console.log(`\n══ STEP 6.${secs}: Fetch after ${secs}s cooldown ══`);
-            await new Promise(r => setTimeout(r, secs * 1000));
-            const ok = await tryFetch(`${secs}s-cooldown`);
-            if (ok) { console.log(`\n🎯 Server unblocked after ${secs}s cooldown!`); break; }
-          }
-
           console.log('\n✅ Test complete.');
           SCRIPT
