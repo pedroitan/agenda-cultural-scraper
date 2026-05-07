@@ -298,7 +298,7 @@ function extractEventsFromListingHtml(html: string, input: ScraperInput): EventI
     
     // Extract venue from p tag with class pn67h1h (e.g. "Colaboraê - Salvador, BA")
     const venueMatch = cardContent.match(/<p[^>]*class="[^"]*pn67h1h[^"]*"[^>]*>([^<]+)<\/p>/i) ||
-                       cardContent.match(/<p[^>]*>([^<]+-[^<]*, BA[^<]*)<\/p>/i)
+                       cardContent.match(/<p[^>]*>([^<]+-[^<]*,\s*[A-Z]{2}[^<]*)<\/p>/i)
     const venue = venueMatch ? venueMatch[1].trim() : undefined
     
     // Extract image URL from img tag - Sympla uses srcset with encoded URLs
@@ -406,7 +406,15 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
     'gratis',
   ]
 
-  console.log(`Scraping ALL events from Salvador...`)
+  // Map city slug to Sympla's URL segment
+  const citySlugMap: Record<string, string> = {
+    'salvador': 'salvador-ba',
+    'rio-de-janeiro': 'rio-de-janeiro-rj',
+    'sao-paulo': 'sao-paulo-sp',
+  }
+  const citySlug = citySlugMap[input.city] ?? input.city
+
+  console.log(`Scraping ALL events from ${input.city} (${citySlug})...`)
 
   // Category names in Portuguese
   const categoryNames: Record<string, string> = {
@@ -431,8 +439,8 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
     // Paginate through pages until no new events found
     for (let page = 1; page <= 20; page++) {
       const url = page === 1 
-        ? `https://www.sympla.com.br/eventos/salvador-ba/${category}`
-        : `https://www.sympla.com.br/eventos/salvador-ba/${category}?page=${page}`
+        ? `https://www.sympla.com.br/eventos/${citySlug}/${category}`
+        : `https://www.sympla.com.br/eventos/${citySlug}/${category}?page=${page}`
       console.log(`Fetching: ${url}`)
       
       try {
@@ -462,8 +470,8 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
     }
   }
 
-  // Phase 2: Also fetch the main Salvador page
-  const mainUrl = `https://www.sympla.com.br/eventos/salvador-ba`
+  // Phase 2: Also fetch the main city page
+  const mainUrl = `https://www.sympla.com.br/eventos/${citySlug}`
   console.log(`Fetching main: ${mainUrl}`)
   
   try {

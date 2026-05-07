@@ -137,24 +137,38 @@ export class EventAggregator {
   }
 
   /**
-   * Converte data DD/MM/YYYY e hora HH:MM para timestamp
+   * Converte data (DD/MM/YYYY ou YYYY-MM-DD) e hora HH:MM para timestamp
    */
   private dateToTimestamp(dateStr: string, timeStr: string): number {
-    const [day, month, year] = dateStr.split('/').map(Number)
-    const [hour, minute] = timeStr.split(':').map(Number)
+    let day: number, month: number, year: number
+
+    if (dateStr.includes('-')) {
+      // Formato YYYY-MM-DD
+      const parts = dateStr.split('-').map(Number)
+      year = parts[0]; month = parts[1]; day = parts[2]
+    } else {
+      // Formato DD/MM/YYYY
+      const parts = dateStr.split('/').map(Number)
+      day = parts[0]; month = parts[1]; year = parts[2]
+    }
+
+    const timeParts = (timeStr || '19:00').split(':').map(Number)
+    const hour = timeParts[0] || 19
+    const minute = timeParts[1] || 0
     
     return new Date(year, month - 1, day, hour, minute).getTime()
   }
 
   /**
-   * Filtra eventos passados
+   * Filtra eventos passados (mantém eventos que começaram há até 4 horas)
    */
   filterFuture(events: ExtractedEvent[]): ExtractedEvent[] {
-    const now = Date.now()
+    const cutoff = Date.now() - (4 * 60 * 60 * 1000) // 4 horas atrás
     
     return events.filter(event => {
+      if (!event.date) return false
       const eventTime = this.dateToTimestamp(event.date, event.time)
-      return eventTime > now
+      return eventTime > cutoff
     })
   }
 

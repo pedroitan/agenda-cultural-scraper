@@ -1,6 +1,6 @@
 export type ScraperInput = {
   source: 'sympla' | 'elcabong' | 'instagram'
-  city: 'salvador'
+  city: 'salvador' | 'rio-de-janeiro' | 'sao-paulo'
   untilDays?: number
 }
 

@@ -93,6 +93,18 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
       await page.waitForTimeout(5000)
     }
 
+    // Intercept AJAX responses to diagnose load-more issues
+    const ajaxResponses: { status: number; url: string; bodyLen: number }[] = []
+    page.on('response', async (response) => {
+      const url = response.url()
+      if (url.includes('admin-ajax') || url.includes('load_more') || url.includes('wpem')) {
+        try {
+          const body = await response.text()
+          ajaxResponses.push({ status: response.status(), url, bodyLen: body.length })
+        } catch {}
+      }
+    })
+
     // Scroll to bottom to ensure button is visible
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
     await page.waitForTimeout(2000)
@@ -116,9 +128,9 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
 
       // Check if button is visible
       const isVisible = await button.isVisible().catch(() => false)
-      console.log(`  Current events: ${prevEventCount}, button visible: ${isVisible}, clicking (attempt ${loadMoreAttempts + 1})`)
 
       // Use Playwright's click which handles scrolling and waiting
+      ajaxResponses.length = 0
       try {
         await button.click({ timeout: 5000 })
       } catch (e) {
@@ -130,14 +142,24 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
       }
 
       // Wait for AJAX
-      await page.waitForTimeout(2000)
+      await page.waitForTimeout(3000)
       
       // Wait for event count to increase
       const newEventCount = await page.locator('.wpem-event-box-col').count()
-      console.log(`  Events after click: ${newEventCount}`)
+      const ajaxInfo = ajaxResponses.length > 0
+        ? `, ajax: ${ajaxResponses.map(r => `${r.status}(${r.bodyLen}b)`).join(', ')}`
+        : ', ajax: none'
+      console.log(`  Click ${loadMoreAttempts + 1}: ${prevEventCount} → ${newEventCount} events${ajaxInfo}`)
       
       if (newEventCount <= prevEventCount) {
         console.log('  No new events loaded, stopping')
+        // Log the button state for debugging
+        const btnText = await button.textContent().catch(() => 'N/A')
+        const btnDisplay = await page.evaluate(() => {
+          const b = document.querySelector('#load_more_events') as HTMLElement
+          return b ? { display: getComputedStyle(b).display, disabled: (b as HTMLButtonElement).disabled, innerHTML: b.innerHTML.slice(0, 200) } : null
+        })
+        console.log(`  Button text: "${btnText}", state: ${JSON.stringify(btnDisplay)}`)
         break
       }
 

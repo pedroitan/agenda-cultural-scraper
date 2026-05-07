@@ -27,6 +27,7 @@ export interface InstagramPost {
   url: string
   likesCount?: number
   commentsCount?: number
+  profilePicture?: string // Imagem de perfil do autor (para usar como thumbnail dos eventos)
 }
 
 export interface ExtractedEvent {

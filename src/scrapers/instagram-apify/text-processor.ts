@@ -218,6 +218,14 @@ export class TextProcessor {
         time = line.replace('Horário:', '').trim()
         // Normalizar formato (remover 'h' extra, etc)
         time = time.replace(/(\d{1,2})h(\d{2})?/, '$1:$2').replace(/h$/, ':00')
+        // Completar formato se estiver incompleto (ex: "18:" → "18:00")
+        if (time.endsWith(':')) {
+          time = time + '00'
+        }
+        // Se só tem hora sem minutos, adicionar :00
+        if (/^\d{1,2}$/.test(time)) {
+          time = time + ':00'
+        }
       }
       // Quanto: ...
       else if (line.startsWith('Quanto:')) {

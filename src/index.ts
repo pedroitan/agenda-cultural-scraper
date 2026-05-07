@@ -5,12 +5,14 @@ import { z } from 'zod'
 import { runSymplaScrape } from './sympla.js'
 import { runElCabongScrape } from './elcabong.js'
 import { runInstagramVisionScrape } from './instagram-vision.js'
+import { runInstagramApifyScrape } from './instagram-apify.js'
 import { supabase } from './supabase.js'
 import type { EventInput, ScrapeRunInsert, ScraperInput } from './types.js'
 
 const EnvSchema = z.object({
-  SCRAPE_CITY: z.literal('salvador').default('salvador'),
+  SCRAPE_CITY: z.enum(['salvador', 'rio-de-janeiro', 'sao-paulo']).default('salvador'),
   SCRAPE_UNTIL_DAYS: z.coerce.number().int().positive().default(90),
+  USE_INSTAGRAM_APIFY: z.string().optional().transform(v => v === 'true'),
 })
 
 type RunMetrics = {
@@ -70,12 +72,18 @@ async function main() {
   const env = EnvSchema.parse(process.env)
   const city = env.SCRAPE_CITY
 
-  // Run all scrapers
+  // Run all scrapers — elcabong and instagram are Salvador-only
   const scrapers = [
-    { name: 'sympla', run: runSymplaScrape },
-    { name: 'elcabong', run: runElCabongScrape },
-    { name: 'instagram', run: (input: ScraperInput) => runInstagramVisionScrape(input, 'agendaalternativasalvador') },
-  ]
+    { name: 'sympla', run: runSymplaScrape, cities: ['salvador', 'rio-de-janeiro', 'sao-paulo'] },
+    { name: 'elcabong', run: runElCabongScrape, cities: ['salvador'] },
+    { 
+      name: 'instagram', 
+      run: env.USE_INSTAGRAM_APIFY 
+        ? runInstagramApifyScrape 
+        : (input: ScraperInput) => runInstagramVisionScrape(input, 'agendaalternativasalvador'),
+      cities: ['salvador'],
+    },
+  ].filter(s => s.cities.includes(city))
 
   for (const scraper of scrapers) {
     const input: ScraperInput = {

@@ -1,329 +1,213 @@
-# Instagram Apify Scraper - Fase 1
+# Instagram Apify Scraper - Fase 2 (Implementado)
 
-## 📋 Componentes Implementados
+## 📋 Arquitetura Implementada
+
+### Fetch Layer (Apify)
+- **ApifyAdapter** - Busca posts do Instagram via `apify/instagram-scraper`
+- Captura caption + comentários do autor (mensagens de continuação)
+- Extrai imagens de posts e carrosséis
+- Cache local para economizar créditos
+
+### Process Layer (Local/Server)
+- **MessageProcessor** (NOVO) - Trata mensagens de continuação do Instagram
+  - Detecta captions truncadas ("… more", "ver mais")
+  - Concatena mensagens do autor
+  - Limpa ruído de menções e hashtags
+  
+- **TextProcessor** - Extrai eventos de captions estruturados
+  - Padrões: 📍⏰💰📅 + dias da semana
+  - Detecção de contexto de data
+  
+- **ImageProcessor** - Processa imagens via Gemini Vision
+  - Download de imagens de URLs
+  - Extração de eventos de imagens
+  - Mantém contexto de data entre imagens
+
+### Aggregation Layer
+- **EventAggregator** - Deduplica, ordena e organiza eventos
+- **InstagramApifyScraper** - Orquestrador principal
+
+## � Estratégia de Scraping
+
+**Conta monitorada:** @agendaalternativasalvador
+
+**Fontes de dados:**
+1. **Posts** (Apify) - Permanentes, mais conteúdo
+2. **Stories** (Instagram Vision) - Mais recentes, desaparecem em 24h
+3. **Mensagens** (Apify comments) - Continuação quando caption não cabe
+
+**Estratégia anti-bloqueio:**
+- Scrape de uma vez via Apify
+- Filtragem e processamento local
+- Cache local para reutilização sem custo
+
+## 🚀 Como Usar
+
+### 1. Configurar variáveis de ambiente
+
+No `.env` do scraper:
+
+```env
+APIFY_TOKEN=seu_token_apify
+GEMINI_API_KEY=sua_chave_gemini
+INSTAGRAM_USERNAME=agendaalternativasalvador
+INSTAGRAM_MAX_POSTS=20
+USE_INSTAGRAM_APIFY=true
+```
+
+### 2. Ativar Instagram Apify
+
+Set `USE_INSTAGRAM_APIFY=true` no `.env` para usar o novo scraper.
+
+O scraper `instagram-vision.ts` continuará funcionando como fallback.
+
+### 3. Rodar scraper
+
+```bash
+npm run build
+npm run dev
+```
+
+## 📊 Componentes Implementados
+
+### ✅ ApifyAdapter
+- Integração com `apify/instagram-scraper`
+- Captura de comentários do autor
+- Download de imagens
+- Verificação de créditos
+
+### ✅ MessageProcessor (NOVO)
+- Detecção de truncação de caption
+- Processamento de mensagens de continuação
+- Extração de eventos de mensagens individuais
+
+### ✅ InstagramApifyScraper (NOVO)
+- Orquestração de todos os processadores
+- Conversão de eventos para EventInput
+- Extração automática de categoria
+- Métricas detalhadas
 
 ### ✅ ContentDetector
-**Arquivo:** `content-detector.ts`
-
-**Função:** Detecta o tipo de conteúdo de um post do Instagram e estima sua qualidade.
-
-**Tipos detectados:**
-- `TEXT_ONLY` - Post com caption estruturado
-- `IMAGE_POST` - Post com imagem única
-- `CAROUSEL` - Post com múltiplas imagens
-- `IMAGE_STORY` - Story com imagem
-- `VIDEO_STORY` - Story com vídeo
-
-**Métodos:**
-- `detect(post)` - Detecta tipo de conteúdo
-- `estimateQuality(post, metadata)` - Retorna score 0-100 baseado em:
-  - Caption estruturado (+30)
-  - Múltiplas imagens (+20)
-  - Idade do post (até +30)
-  - Engajamento (até +20)
-
----
+- Detecção de tipo de conteúdo
+- Cálculo de quality score
 
 ### ✅ TextProcessor
-**Arquivo:** `text-processor.ts`
-
-**Função:** Extrai eventos de captions estruturados do Instagram.
-
-**Padrões detectados:**
-- Emojis de evento: 🎭🎪🎨🎵🎸🎤
-- Emojis de informação: 📍 (local), ⏰ (horário), 💰 (preço), 📅 (data)
-- Dias da semana: SEXTA, SÁBADO, DOMINGO, etc.
-- Horários: 19:00, 21:30, etc.
-- Datas: 30/01, 31/01, etc.
-
-**Métodos:**
-- `extractEvents(caption, postUrl)` - Extrai eventos do caption
-- `detectDateContext(caption)` - Detecta contexto de datas (ex: "SEXTA (30/01)")
-- `cleanCaption(caption)` - Remove ruído do Instagram
-- `splitIntoEventBlocks(text)` - Divide caption em blocos de eventos
-
-**Exemplo de caption processado:**
-```
-🎭 SEXTA-FEIRA (30/01)
-
-Disconnected
-📍 Só Shape - Rio Vermelho
-⏰ 21:00
-💰 Grátis
-
-Festa Proibida
-📍 Discodelia Pub
-⏰ 19:00
-💰 Grátis
-```
-
-**Resultado:**
-```javascript
-[
-  {
-    title: "Disconnected",
-    venue: "Só Shape - Rio Vermelho",
-    time: "21:00",
-    price: "Grátis",
-    date: "30/01/2026"
-  },
-  {
-    title: "Festa Proibida",
-    venue: "Discodelia Pub",
-    time: "19:00",
-    price: "Grátis",
-    date: "30/01/2026"
-  }
-]
-```
-
----
+- Extração de eventos de captions
+- Detecção de contexto de data
+- Limpeza de texto
 
 ### ✅ ImageProcessor
-**Arquivo:** `image-processor.ts`
-
-**Função:** Wrapper para Gemini Vision API que processa imagens de posts/stories.
-
-**Características:**
-- Processa múltiplas imagens sequencialmente
-- Mantém contexto de data entre imagens
-- Valida formato e tamanho das imagens
-- Integra com `utils/gemini-vision.ts` existente
-
-**Métodos:**
-- `extractEvents(images, previousDate)` - Processa múltiplas imagens
-- `extractFromSingleImage(imageBuffer, previousDate)` - Processa uma imagem
-- `validateImage(imageBuffer)` - Valida se imagem é processável
-
-**Validações:**
-- Tamanho mínimo: 10KB
-- Tamanho máximo: 10MB
-- Formatos: JPEG, PNG, GIF
-
----
+- Download de imagens de URLs
+- Processamento via Gemini Vision
+- Validação de formato/tamanho
 
 ### ✅ EventAggregator
-**Arquivo:** `event-aggregator.ts`
+- Deduplicação inteligente
+- Ordenação cronológica
+- Filtragem de eventos futuros
 
-**Função:** Deduplica, ordena e agrupa eventos extraídos.
+## 📁 Arquivos Criados/Atualizados
 
-**Métodos principais:**
+```
+src/
+├── instagram-apify.ts                    # Wrapper para integração (NOVO)
+├── index.ts                              # Atualizado para usar Apify
+└── scrapers/instagram-apify/
+    ├── instagram-apify-scraper.ts        # Orquestrador principal (NOVO)
+    ├── message-processor.ts              # Processamento de mensagens (NOVO)
+    ├── apify-adapter.ts                  # Integração Apify
+    ├── content-detector.ts               # Detecção de conteúdo
+    ├── text-processor.ts                # Extração de texto
+    ├── image-processor.ts               # Processamento de imagem
+    └── event-aggregator.ts              # Agregação de eventos
+```
 
-#### `deduplicate(events)`
-Remove duplicatas baseado em:
-- Título normalizado (sem acentos, pontuação)
-- Data (DD/MM/YYYY)
-- Local normalizado
+## 🔄 Fluxo de Dados
 
-**Merge inteligente:**
-- Mantém título mais longo
-- Prefere preço específico sobre "Consulte"
-- Combina descrições diferentes
-
-#### `sort(events)`
-Ordena eventos por data e horário (cronológico)
-
-#### `filterFuture(events)`
-Remove eventos passados
-
-#### `groupByDate(events)`
-Agrupa eventos por data
-
-#### `getStats(events)`
-Retorna estatísticas:
-- Total de eventos
-- Eventos por data
-- Eventos gratuitos vs pagos
-
----
+```
+Instagram (@agendaalternativasalvador)
+         ↓
+    Apify Scraper
+         ↓
+    Cache Local (JSON)
+         ↓
+┌─────────────────────────────┐
+│ InstagramApifyScraper      │
+├─────────────────────────────┤
+│ 1. ApifyAdapter            │
+│    - Buscar posts          │
+│    - Baixar imagens        │
+├─────────────────────────────┤
+│ 2. MessageProcessor        │
+│    - Tratar mensagens      │
+├─────────────────────────────┤
+│ 3. TextProcessor           │
+│    - Extrair caption       │
+├─────────────────────────────┤
+│ 4. ImageProcessor          │
+│    - Processar imagens     │
+├─────────────────────────────┤
+│ 5. EventAggregator         │
+│    - Deduplicar            │
+│    - Ordenar               │
+└─────────────────────────────┘
+         ↓
+    Supabase (events)
+```
 
 ## 🧪 Testes
 
-### Executar testes:
+Para testar o Instagram Apify Scraper:
+
 ```bash
+cd agenda-cultural-scraper
 npm run build
-node dist/scrapers/instagram-apify/test-processors.js
+node dist/scrapers/instagram-apify/test-apify-connection.js
 ```
 
-### O que é testado:
-1. **ContentDetector**
-   - Detecção de tipo de conteúdo
-   - Cálculo de quality score
+## 📈 Métricas Esperadas
 
-2. **TextProcessor**
-   - Extração de eventos de caption
-   - Detecção de contexto de data
-   - Limpeza de texto
+| Fonte | Eventos/Post | Taxa Sucesso | Tempo |
+|-------|--------------|--------------|-------|
+| Caption | 5-15 | 95% | ~1s |
+| Imagens | 3-8 | 85% | ~5s |
+| Mensagens | 2-5 | 90% | ~1s |
 
-3. **EventAggregator**
-   - Deduplicação
-   - Ordenação
-   - Estatísticas
-   - Agrupamento por data
+**Total esperado:**
+- 20 posts/dia
+- 100-200 eventos/dia
+- Tempo total: 5-10 minutos
 
-### Exemplo de saída:
-```
-🧪 Testing ContentDetector
-==================================================
+## 🎯 Próximos Passos
 
-📝 Text Post:
-  Type: text_only
-  Has Caption: true
-  Has Images: false
-  Image Count: 0
-  Quality Score: 60
-
-🧪 Testing TextProcessor
-==================================================
-
-✅ Extracted 3 events:
-
-1. Disconnected
-   📅 30/01/2026 às 21:00
-   📍 Só Shape - Rio Vermelho
-   💰 Grátis
-
-2. Festa Proibida - Wil Da Nilo & Discodelia DJs
-   📅 30/01/2026 às 19:00
-   📍 Discodelia Pub - Rio Vermelho
-   💰 Grátis
-
-3. Keko Beatz e Baianos
-   📅 30/01/2026 às 21:00
-   📍 ECO - Rio Vermelho
-   💰 Grátis
-```
-
----
-
-## 📊 Cobertura Atual
-
-### ✅ Implementado (Fase 1)
-- [x] ContentDetector
-- [x] TextProcessor
-- [x] ImageProcessor
-- [x] EventAggregator
-- [x] Tipos TypeScript
-- [x] Testes unitários
-
-### ⏳ Pendente (Próximas fases)
-- [ ] ApifyAdapter (integração com Apify API)
-- [ ] InstagramApifyScraper principal
-- [ ] VideoProcessor (Fase 2)
-- [ ] Integração com BaseScraper
-- [ ] Configuração no scrapers.config.ts
-- [ ] Testes end-to-end com dados reais
-
----
-
-## 🔄 Próximos Passos
-
-1. **Instalar dependência Apify:**
-   ```bash
-   npm install apify-client
-   ```
-
-2. **Criar conta Apify:**
-   - https://console.apify.com
-   - Obter API token
-
-3. **Implementar ApifyAdapter:**
-   - Integração com Instagram Profile Scraper
-   - Download de imagens
-
-4. **Implementar InstagramApifyScraper:**
-   - Orquestrar todos os processadores
-   - Integrar com BaseScraper
-
-5. **Testar com dados reais:**
-   - Posts do @agendaalternativasalvador
-   - Validar extração de eventos
-
----
-
-## 📚 Arquitetura
-
-```
-InstagramApifyScraper (pendente)
-├── ApifyAdapter (pendente)
-│   └── Busca posts do Instagram
-├── ContentDetector ✅
-│   └── Detecta tipo de conteúdo
-├── Router (pendente)
-│   ├─→ TextProcessor ✅
-│   ├─→ ImageProcessor ✅
-│   └─→ VideoProcessor (Fase 2)
-└── EventAggregator ✅
-    └── Deduplica e organiza eventos
-```
-
----
-
-## 🎯 Métricas Esperadas
-
-### Por Formato
-| Formato | Processamento | Taxa Sucesso | Eventos/Post |
-|---------|--------------|--------------|--------------|
-| Texto   | ~1s          | 95%          | 5-15         |
-| Imagem  | ~5s          | 85%          | 3-8          |
-| Vídeo   | ~15s         | 70%          | 2-5          |
-
-### Total
-- **20-30 posts/dia**
-- **100-200 eventos/dia**
-- **Taxa de sucesso global: 85%**
-- **Tempo total: 5-10 minutos**
-
----
+- [x] Implementar MessageProcessor
+- [x] Implementar InstagramApifyScraper
+- [x] Integrar com index.ts
+- [x] Compilar sem erros
+- [ ] Testar com dados reais @agendaalternativasalvador
+- [ ] Criar workflow GitHub Actions separado para Stories (cada 6h)
+- [ ] Adicionar mais contas do Instagram (se necessário)
 
 ## 🐛 Troubleshooting
 
-### Eventos não extraídos do caption
+### Eventos não extraídos
 - Verificar se caption tem padrões estruturados
-- Adicionar mais padrões em `TextProcessor.isEventStart()`
-- Verificar logs de debug
-
-### Duplicatas não removidas
-- Verificar normalização em `EventAggregator.normalize()`
-- Ajustar lógica de merge se necessário
+- Checar logs de debug do TextProcessor
+- Validar se Apify está capturando comentários do autor
 
 ### Imagens não processadas
-- Verificar se Gemini API key está configurada
-- Verificar formato e tamanho das imagens
-- Checar logs de erro do Gemini
+- Verificar GEMINI_API_KEY
+- Checar formato e tamanho das imagens
+- Ver logs de erro do Gemini
 
----
+### Erro de conexão Apify
+- Verificar APIFY_TOKEN
+- Checar créditos disponíveis
+- Testar conexão manualmente
 
-## 📝 Notas de Desenvolvimento
+## 📝 Notas de Design
 
-### Decisões de Design
-
-1. **Processamento sequencial de imagens:**
-   - Mantém contexto de data entre imagens
-   - Importante para stories em sequência
-
-2. **Normalização agressiva para deduplicação:**
-   - Remove acentos e pontuação
-   - Evita duplicatas por pequenas diferenças
-
-3. **Merge inteligente:**
-   - Preserva informação mais completa
-   - Combina descrições diferentes
-
-4. **Quality score:**
-   - Prioriza posts recentes e com engajamento
-   - Útil para ordenar processamento
-
-### Padrões Observados
-
-**Posts do @agendaalternativasalvador:**
-- Usa emojis consistentemente (📍⏰💰)
-- Agrupa eventos por dia da semana
-- Formato: Título + Local + Horário + Preço
-- Múltiplos eventos por post
-
-**Melhorias Futuras:**
-- Detectar mais padrões de caption
-- Suporte a mais formatos de data
-- Extração de categoria do título
-- Detecção de eventos recorrentes
+1. **Mensagens de continuação:** Apify captura comentários do autor no `latestComments`, que são concatenados ao caption
+2. **Download de imagens:** URLs são convertidas para Buffers antes de passar para ImageProcessor
+3. **Fallback:** Instagram Vision continua funcionando se USE_INSTAGRAM_APIFY não estiver definido
+4. **Cache local:** Sistema de cache existente pode ser reutilizado para economizar créditos Apify
