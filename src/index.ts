@@ -64,15 +64,13 @@ async function finalizeRun(
 async function upsertEvents(events: EventInput[]) {
   if (events.length === 0) return 0
 
-  // Usar insert simples - erros de duplicata serão ignorados
-  const { error } = await supabase.from('events').insert(events)
+  // UPSERT por external_id — atualiza eventos existentes (image_url, url, title, etc.)
+  // Resolve problema de eventos antigos com image_url=null nunca serem atualizados
+  const { error } = await supabase
+    .from('events')
+    .upsert(events, { onConflict: 'source,external_id', ignoreDuplicates: false })
 
   if (error) {
-    // Se for erro de duplicata (23505), ignorar
-    if (error.code === '23505') {
-      console.log(`⚠️  ${events.length} eventos já existiam (duplicatas ignoradas)`)
-      return 0
-    }
     throw error
   }
 
