@@ -23,7 +23,12 @@ type RunMetrics = {
 }
 
 async function createRun(source: string, city: string) {
-  const insert: ScrapeRunInsert = { source, city, status: 'running' }
+  const insert: ScrapeRunInsert = {
+    source,
+    city,
+    status: 'running',
+    started_at: new Date().toISOString(),
+  }
   const { data, error } = await supabase
     .from('scrape_runs')
     .insert(insert)
@@ -59,12 +64,18 @@ async function finalizeRun(
 async function upsertEvents(events: EventInput[]) {
   if (events.length === 0) return 0
 
-  const { error } = await supabase.from('events').upsert(events, {
-    onConflict: 'source,external_id',
-    ignoreDuplicates: false,
-  })
+  // Usar insert simples - erros de duplicata serão ignorados
+  const { error } = await supabase.from('events').insert(events)
 
-  if (error) throw error
+  if (error) {
+    // Se for erro de duplicata (23505), ignorar
+    if (error.code === '23505') {
+      console.log(`⚠️  ${events.length} eventos já existiam (duplicatas ignoradas)`)
+      return 0
+    }
+    throw error
+  }
+
   return events.length
 }
 
@@ -113,8 +124,9 @@ async function main() {
       console.log(JSON.stringify({ level: 'info', msg: 'scrape_success', source: scraper.name, runId: run.id, ...metrics }))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      const errorDetails = err instanceof Error ? { message: err.message, stack: err.stack } : err
       await finalizeRun(run.id, 'failed', metrics, message)
-      console.error(JSON.stringify({ level: 'error', msg: 'scrape_failed', source: scraper.name, runId: run.id, error: message }))
+      console.error(JSON.stringify({ level: 'error', msg: 'scrape_failed', source: scraper.name, runId: run.id, error: message, details: errorDetails }))
     }
   }
 }
