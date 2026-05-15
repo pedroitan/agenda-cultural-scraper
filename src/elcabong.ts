@@ -192,13 +192,30 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         const [date, time] = datetime ? datetime.split(' - ') : [null, null]
         const location = (event.querySelector('.wpem-event-location') as HTMLElement)?.textContent?.trim() || null
         const link = (event.querySelector('a.wpem-event-action-url') as HTMLAnchorElement)?.href || null
+
+        // Try multiple selectors for image URL
+        let imageUrl: string | null = null
         const bannerImg = event.querySelector('.wpem-event-banner-img') as HTMLElement
-        // Try SpeedyCache attribute first, then background-image
-        let imageUrl = bannerImg?.getAttribute('data-speedycache-original-src') || null
-        if (!imageUrl) {
-          imageUrl = bannerImg?.style?.backgroundImage
-            ?.replace(/url\(["']?/, '')
-            ?.replace(/["']?\)$/, '') || null
+        if (bannerImg) {
+          // Try SpeedyCache attribute first
+          imageUrl = bannerImg.getAttribute('data-speedycache-original-src')
+          // Try background-image style
+          if (!imageUrl && bannerImg.style?.backgroundImage) {
+            imageUrl = bannerImg.style.backgroundImage
+              .replace(/url\(["']?/, '')
+              .replace(/["']?\)$/, '')
+          }
+          // Try src attribute
+          if (!imageUrl) {
+            const imgElement = bannerImg.querySelector('img') as HTMLImageElement
+            if (imgElement?.src) {
+              imageUrl = imgElement.src
+            }
+          }
+          // Try data-src attribute (lazy loading)
+          if (!imageUrl) {
+            imageUrl = bannerImg.getAttribute('data-src')
+          }
         }
 
         if (title && date && location && link) {
