@@ -1,0 +1,58 @@
+name: Generate Weekend Tours — Salvador
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Segunda-feira às 03:00 BRT (06:00 UTC) — geração inicial
+    - cron: '0 14 * * 4'  # Quinta-feira às 11:00 BRT (14:00 UTC) — atualização com eventos mais recentes
+  workflow_dispatch:
+    inputs:
+      force_regenerate:
+        description: 'Forçar regeneração mesmo se tours já existirem'
+        required: false
+        default: 'false'
+
+jobs:
+  generate-tours:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate weekend tours (Segunda - inicial)
+        if: github.event.schedule == '0 6 * * 1'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SCRAPE_CITY: salvador
+          FORCE_REGENERATE: 'false'
+        run: npx tsx generate-weekend-tours.ts
+
+      - name: Generate weekend tours (Quinta - atualização forçada)
+        if: github.event.schedule == '0 14 * * 4'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SCRAPE_CITY: salvador
+          FORCE_REGENERATE: 'true'
+        run: npx tsx generate-weekend-tours.ts
+
+      - name: Generate weekend tours (manual)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SCRAPE_CITY: salvador
+          FORCE_REGENERATE: ${{ github.event.inputs.force_regenerate }}
+        run: npx tsx generate-weekend-tours.ts

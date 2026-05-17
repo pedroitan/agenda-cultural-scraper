@@ -10,7 +10,11 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:rj": "node test-rj-minimal.mjs",
-    "test:upsert": "node test-upsert-rj.mjs"
+    "test:upsert": "node test-upsert-rj.mjs",
+    "scrape:sympla": "tsx run-sympla.ts",
+    "scrape:elcabong": "tsx run-elcabong.ts",
+    "scrape:instagram": "tsx run-instagram.ts",
+    "tours:generate": "tsx generate-weekend-tours.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
