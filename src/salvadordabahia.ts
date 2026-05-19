@@ -9,6 +9,7 @@ type SalvadorScraperResult = {
 
 const BASE_URL = 'https://www.salvadordabahia.com'
 const AGENDA_URL = `${BASE_URL}/agenda/`
+const AJAX_AGENDA_URL = `${BASE_URL}/wp-content/themes/iwwa-salvador-da-bahia/ajax/agenda/card.php`
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -260,42 +261,80 @@ async function scrapeEventDetail(url: string): Promise<EventInput | null> {
   }
 }
 
+// Buscar uma página de eventos via endpoint AJAX
+async function fetchAgendaPage(dataInicial: string, dataFinal: string, page: number): Promise<string | null> {
+  try {
+    const params = new URLSearchParams({
+      data_inicial: dataInicial,
+      data_final: dataFinal,
+      categ: '',
+      page: String(page),
+    })
+    const res = await fetch(AJAX_AGENDA_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (compatible; AgendaCulturalBot/1.0)',
+        'Referer': AGENDA_URL,
+        'Origin': BASE_URL,
+      },
+      body: params.toString(),
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) return null
+    return await res.text()
+  } catch {
+    return null
+  }
+}
+
 export async function runSalvadorDaBahiaScrape(input: ScraperInput): Promise<SalvadorScraperResult> {
-  const untilDays = input.untilDays ?? 30
   const seenSlugs = new Set<string>()
   const allLinks: string[] = []
 
-  console.log(`[salvadordabahia] Buscando agenda dos próximos ${untilDays} dias`)
+  const today = new Date().toISOString().split('T')[0]
+  const futureDate = '2099-12-31'
 
-  // Coletar links de hoje + próximos dias
-  const today = new Date()
-  for (let i = 0; i < untilDays; i++) {
-    const date = new Date(today)
-    date.setDate(today.getDate() + i)
-    const dateStr = date.toISOString().split('T')[0] // YYYY-MM-DD
+  console.log(`[salvadordabahia] Buscando todos os eventos via AJAX (de ${today} em diante)`)
 
-    const url = i === 0 ? AGENDA_URL : `${AGENDA_URL}?data=${dateStr}`
-    console.log(`[salvadordabahia] Agenda ${dateStr}: ${url}`)
+  // Página 1 para descobrir o total
+  const html1 = await fetchAgendaPage(today, futureDate, 1)
+  if (!html1) {
+    console.error('[salvadordabahia] Falhou ao buscar página 1')
+    return { valid: [], invalid_count: 0, items_fetched: 0 }
+  }
 
-    const html = await fetchHtml(url)
-    if (!html) {
-      console.warn(`[salvadordabahia] Falhou ao buscar ${url}`)
-      await delay(1000)
-      continue
+  const $1 = cheerio.load(html1)
+  const totalPosts = Number($1('[data-total-posts]').first().attr('data-total-posts') || 0)
+  const perPage = $1('a[href*="/eventos/"]').length / 2 || 12 // cada link aparece 2x (imagem + título)
+  const totalPages = Math.ceil(totalPosts / (perPage || 12))
+
+  console.log(`[salvadordabahia] Total de eventos: ${totalPosts} | ~${totalPages} páginas`)
+
+  // Extrair links da página 1
+  const links1 = extractEventLinks(html1)
+  for (const link of links1) {
+    const slug = link.replace(/.*\/eventos\//, '').replace(/\/$/, '')
+    if (!seenSlugs.has(slug)) { seenSlugs.add(slug); allLinks.push(link) }
+  }
+  console.log(`[salvadordabahia] Página 1: ${links1.length} links → ${seenSlugs.size} únicos`)
+
+  // Páginas 2..N
+  for (let page = 2; page <= totalPages; page++) {
+    await delay(700)
+    const html = await fetchAgendaPage(today, futureDate, page)
+    if (!html || html.trim().length < 50) {
+      console.log(`[salvadordabahia] Página ${page}: vazia, parando`)
+      break
     }
-
     const links = extractEventLinks(html)
-    console.log(`[salvadordabahia]  → ${links.length} links encontrados`)
-
+    let newCount = 0
     for (const link of links) {
       const slug = link.replace(/.*\/eventos\//, '').replace(/\/$/, '')
-      if (!seenSlugs.has(slug)) {
-        seenSlugs.add(slug)
-        allLinks.push(link)
-      }
+      if (!seenSlugs.has(slug)) { seenSlugs.add(slug); allLinks.push(link); newCount++ }
     }
-
-    await delay(800)
+    console.log(`[salvadordabahia] Página ${page}: ${links.length} links → ${newCount} novos (total: ${allLinks.length})`)
+    if (links.length === 0) break
   }
 
   console.log(`[salvadordabahia] Total de eventos únicos: ${allLinks.length}`)

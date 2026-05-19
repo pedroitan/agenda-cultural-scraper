@@ -1,12 +1,9 @@
 import 'dotenv/config'
 import { runSalvadorDaBahiaScrape } from './src/salvadordabahia.js'
 
-const untilDays = process.env.SCRAPE_UNTIL_DAYS ? parseInt(process.env.SCRAPE_UNTIL_DAYS) : 60
-
 const result = await runSalvadorDaBahiaScrape({
   source: 'salvadordabahia' as any,
   city: 'salvador',
-  untilDays,
 })
 
 console.log('\n====== RESULTADO ======')
