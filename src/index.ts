@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import { runSymplaScrape } from './sympla.js'
 import { runElCabongScrape } from './elcabong.js'
+import { runSalvadorDaBahiaScrape } from './salvadordabahia.js'
 import { runInstagramVisionScrape } from './instagram-vision.js'
 import { runInstagramApifyScrape } from './instagram-apify.js'
 import { supabase } from './supabase.js'
@@ -85,6 +86,7 @@ async function main() {
   const scrapers = [
     { name: 'sympla', run: runSymplaScrape, cities: ['salvador', 'rio-de-janeiro', 'sao-paulo'] },
     { name: 'elcabong', run: runElCabongScrape, cities: ['salvador'] },
+    { name: 'salvadordabahia', run: runSalvadorDaBahiaScrape, cities: ['salvador'] },
     { 
       name: 'instagram', 
       run: env.USE_INSTAGRAM_APIFY 
