@@ -100,7 +100,7 @@ function extractEventFromHtml(html: string, eventId: string, url: string, input:
       const imageUrl = eventData.image || eventData.imageUrl || eventData.banner || eventData.cover
       const isFree = eventData.is_free || eventData.isFree || eventData.free || false
       const price = eventData.price || eventData.price_text || eventData.priceText
-      
+
       if (title && startDate) {
         return {
           source: input.source,
