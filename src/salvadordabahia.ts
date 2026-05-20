@@ -180,12 +180,6 @@ export async function scrapeEventDetail(url: string): Promise<EventInput | null>
     start_datetime = start
   }
 
-  // Horário — combinar com data se encontrado
-  if (horarioText && start_datetime) {
-    const time = parseTime(horarioText)
-    start_datetime = start_datetime.replace('T00:00:00', `T${time}`)
-  }
-
   // Fallback 1: campo "Visitação:" pode conter datas
   if (!start_datetime) {
     $('p').each((_, el) => {
@@ -218,6 +212,15 @@ export async function scrapeEventDetail(url: string): Promise<EventInput | null>
   }
 
   if (!start_datetime) return null
+
+  // Aplicar horário — campo "Horário:", tempo embutido no dataText, ou body text
+  if (start_datetime.endsWith('T00:00:00')) {
+    const timeSource = horarioText || dataText
+    const time = parseTime(timeSource)
+    if (time !== '00:00:00') {
+      start_datetime = start_datetime.replace('T00:00:00', `T${time}`)
+    }
+  }
 
   // Venue
   let venue_name: string | undefined = localText || undefined
