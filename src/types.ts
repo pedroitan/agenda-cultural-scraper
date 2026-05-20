@@ -17,6 +17,11 @@ export type EventInput = {
   price_text?: string
   category?: string
   url: string
+  description?: string
+  performers?: string
+  duration?: string
+  age_restriction?: string
+  organizer?: string
   raw_payload: unknown
 }
 

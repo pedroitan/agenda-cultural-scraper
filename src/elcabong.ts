@@ -266,6 +266,11 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         category: 'Shows e Festas',
         is_free: false,
         url: ev.url,
+        description: undefined, // El Cabong scrapes from list view, not detail pages
+        performers: undefined,
+        duration: undefined,
+        age_restriction: undefined,
+        organizer: undefined,
         raw_payload: ev.raw,
       })
       items_fetched++

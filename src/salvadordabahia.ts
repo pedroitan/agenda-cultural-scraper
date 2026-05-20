@@ -255,6 +255,64 @@ export async function scrapeEventDetail(url: string): Promise<EventInput | null>
   else if (bodyLower.includes('gastronomia') || bodyLower.includes('culinária')) category = 'Gastronomia'
   else if (bodyLower.includes('workshop') || bodyLower.includes('oficina') || bodyLower.includes('palestra')) category = 'Cursos'
 
+  // Descrição — pegar os parágrafos do conteúdo principal
+  let description: string | undefined
+  $('.sessao-conteudo .box-content p').each((_, el) => {
+    const text = $(el).text().trim()
+    // Excluir parágrafos que são metadados (Data:, Local:, etc.)
+    if (text.length > 50 && !text.match(/^(data|local|hor[aá]rio|servi[çc]o|entrada|valor):/i)) {
+      if (!description) {
+        description = text
+      } else {
+        description += '\n\n' + text
+      }
+    }
+  })
+
+  // Organizador — procurar por "Organizado por" ou similar
+  let organizer: string | undefined
+  $('p').each((_, el) => {
+    const text = $(el).text().trim()
+    const orgMatch = text.match(/organiza[çc][aã]o|organizador|realiza[çc][aã]o|produ[çc][aã]o:\s*([^\n\r]+)/i)
+    if (orgMatch && !organizer) {
+      organizer = orgMatch[1]?.trim() || text.replace(/organiza[çc][aã]o|organizador|realiza[çc][aã]o|produ[çc][aã]o:\s*/i, '').trim()
+    }
+  })
+
+  // Atratores/artistas — procurar por "Com", "Com a participação", "Com:"
+  let performers: string | undefined
+  $('p').each((_, el) => {
+    const text = $(el).text().trim()
+    const perfMatch = text.match(/(?:com|com a participa[çc][aã]o|atratores|artistas):\s*([^\n\r]+)/i)
+    if (perfMatch && !performers) {
+      performers = perfMatch[1]?.trim()
+    }
+  })
+
+  // Duração — procurar por "Duração" ou similar
+  let duration: string | undefined
+  $('p').each((_, el) => {
+    const text = $(el).text().trim()
+    const durMatch = text.match(/dura[çc][aã]o:\s*([^\n\r]+)/i)
+    if (durMatch && !duration) {
+      duration = durMatch[1]?.trim()
+    }
+  })
+
+  // Classificação etária — procurar por "Classificação", "+18", "Livre"
+  let age_restriction: string | undefined
+  $('p').each((_, el) => {
+    const text = $(el).text().trim()
+    if (text.match(/classifica[çc][aã]o:\s*\+?\d+/i)) {
+      const ageMatch = text.match(/classifica[çc][aã]o:\s*(\+?\d+)/i)
+      if (ageMatch && !age_restriction) {
+        age_restriction = ageMatch[1]
+      }
+    } else if (text.includes('livre') && !age_restriction) {
+      age_restriction = 'Livre'
+    }
+  })
+
   return {
     source: 'salvadordabahia',
     external_id: slug,
@@ -267,6 +325,11 @@ export async function scrapeEventDetail(url: string): Promise<EventInput | null>
     price_text,
     category,
     url,
+    description,
+    performers,
+    duration,
+    age_restriction,
+    organizer,
     raw_payload: { slug, dataText, localText, horarioText },
   }
 }

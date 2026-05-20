@@ -101,6 +101,13 @@ function extractEventFromHtml(html: string, eventId: string, url: string, input:
       const isFree = eventData.is_free || eventData.isFree || eventData.free || false
       const price = eventData.price || eventData.price_text || eventData.priceText
 
+      // Extract additional fields from eventData
+      const description = eventData.description || eventData.description_text || eventData.long_description || eventData.summary || undefined
+      const performers = eventData.artists || eventData.performers || eventData.lineup || eventData.hosts || undefined
+      const duration = eventData.duration || eventData.expected_duration || undefined
+      const ageRestriction = eventData.age_restriction || eventData.ageRestriction || eventData.classification || eventData.rating || undefined
+      const organizer = eventData.organizer?.name || eventData.organization?.name || eventData.producer?.name || eventData.host?.name || undefined
+
       if (title && startDate) {
         return {
           source: input.source,
@@ -113,6 +120,11 @@ function extractEventFromHtml(html: string, eventId: string, url: string, input:
           is_free: Boolean(isFree),
           price_text: price,
           url,
+          description,
+          performers: Array.isArray(performers) ? performers.join(', ') : performers,
+          duration,
+          age_restriction: ageRestriction,
+          organizer,
           raw_payload: eventData,
         }
       }
