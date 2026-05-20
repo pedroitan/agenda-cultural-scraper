@@ -124,7 +124,7 @@ function extractEventLinks(html: string): string[] {
 }
 
 // Extrair dados de uma página de detalhe de evento
-async function scrapeEventDetail(url: string): Promise<EventInput | null> {
+export async function scrapeEventDetail(url: string): Promise<EventInput | null> {
   const html = await fetchHtml(url)
   if (!html) return null
 
@@ -141,53 +141,61 @@ async function scrapeEventDetail(url: string): Promise<EventInput | null> {
   // Slug para external_id
   const slug = url.replace(/.*\/eventos\//, '').replace(/\/$/, '')
 
-  // Extrair bloco "Serviço" — procurar pelo heading e pegar o container pai
-  let serviceText = ''
-  $('h2, h3, h4, strong, b, p').each((_, el) => {
+  // Extrair dados diretamente de parágrafos que contenham as palavras-chave
+  let dataText = ''
+  let localText = ''
+  let horarioText = ''
+
+  // Procurar parágrafo com "Data:"
+  $('p').each((_, el) => {
     const text = $(el).text().trim()
-    if (/^servi[çc]o$/i.test(text)) {
-      // Pegar o pai ou o próximo container com o conteúdo
-      const parent = $(el).parent()
-      serviceText = parent.text()
-      if (serviceText.length < 50) {
-        // Tentar o próximo sibling
-        serviceText = $(el).nextAll().first().text() + parent.text()
-      }
+    const dataMatch = text.match(/data:\s*([^\n\r]+)/i)
+    if (dataMatch && !dataText) {
+      dataText = dataMatch[1].trim()
     }
   })
 
-  // Fallback: buscar bloco que contenha "Data:" e "Local:"
-  if (!serviceText) {
-    $('*').each((_, el) => {
-      const text = $(el).text()
-      if (text.includes('Data:') && text.includes('Local:') && text.length < 3000) {
-        serviceText = text
-      }
-    })
-  }
+  // Procurar parágrafo com "Local:"
+  $('p').each((_, el) => {
+    const text = $(el).text().trim()
+    const localMatch = text.match(/local:\s*([^\n\r]+)/i)
+    if (localMatch && !localText) {
+      localText = localMatch[1].trim()
+    }
+  })
+
+  // Procurar parágrafo com "Horário" ou "Horários de visitação"
+  $('p').each((_, el) => {
+    const text = $(el).text().trim()
+    const horarioMatch = text.match(/hor[aá]rio[s]?(?:\s+de\s+visita[çc][aã]o)?:\s*([^\n\r]+)/i)
+    if (horarioMatch && !horarioText) {
+      horarioText = horarioMatch[1].trim()
+    }
+  })
 
   // Data
   let start_datetime: string | null = null
-  const dataMatch = serviceText.match(/data:\s*([^\n\r]+)/i)
-  if (dataMatch) {
-    const { start } = parseDateRange(dataMatch[1])
+  if (dataText) {
+    const { start } = parseDateRange(dataText)
     start_datetime = start
   }
 
   // Horário — combinar com data se encontrado
-  const horarioMatch = serviceText.match(/hor[aá]rio[s]?(?:\s+de\s+visita[çc][aã]o)?:\s*([^\n\r]+)/i)
-  if (horarioMatch && start_datetime) {
-    const time = parseTime(horarioMatch[1])
+  if (horarioText && start_datetime) {
+    const time = parseTime(horarioText)
     start_datetime = start_datetime.replace('T00:00:00', `T${time}`)
   }
 
   // Fallback 1: campo "Visitação:" pode conter datas
   if (!start_datetime) {
-    const visitMatch = serviceText.match(/visita[çc][aã]o:\s*([^\n\r]+)/i)
-    if (visitMatch) {
-      const { start } = parseDateRange(visitMatch[1])
-      start_datetime = start
-    }
+    $('p').each((_, el) => {
+      const text = $(el).text().trim()
+      const visitMatch = text.match(/visita[çc][aã]o:\s*([^\n\r]+)/i)
+      if (visitMatch && !start_datetime) {
+        const { start } = parseDateRange(visitMatch[1])
+        start_datetime = start
+      }
+    })
   }
 
   // Fallback 2: "Entre os dias X e Y de MÊS" no body
@@ -212,26 +220,25 @@ async function scrapeEventDetail(url: string): Promise<EventInput | null> {
   if (!start_datetime) return null
 
   // Venue
-  let venue_name: string | undefined
-  const localMatch = serviceText.match(/local:\s*([^\n\r]+)/i)
-  if (localMatch) {
-    venue_name = localMatch[1].trim()
-  }
+  let venue_name: string | undefined = localText || undefined
 
   // Preço / gratuidade
-  const serviceTextLower = serviceText.toLowerCase()
   const bodyLower = $('body').text().toLowerCase()
   const is_free =
-    serviceTextLower.includes('gratuita') ||
-    serviceTextLower.includes('gratuito') ||
-    serviceTextLower.includes('entrada gratuita') ||
-    bodyLower.includes('entrada gratuita')
+    bodyLower.includes('entrada gratuita') ||
+    bodyLower.includes('gratuita') ||
+    bodyLower.includes('gratuito')
 
   let price_text: string | undefined
-  const precoMatch = serviceText.match(/(?:valor|ingresso|entrada|pre[çc]o):\s*([^\n]+)/i)
-  if (precoMatch) {
-    price_text = precoMatch[1].trim()
-  } else if (is_free) {
+  // Procurar preço em parágrafos
+  $('p').each((_, el) => {
+    const text = $(el).text().trim()
+    const precoMatch = text.match(/(?:valor|ingresso|entrada|pre[çc]o):\s*([^\n]+)/i)
+    if (precoMatch && !price_text) {
+      price_text = precoMatch[1].trim()
+    }
+  })
+  if (!price_text && is_free) {
     price_text = 'Gratuito'
   }
 
@@ -257,7 +264,7 @@ async function scrapeEventDetail(url: string): Promise<EventInput | null> {
     price_text,
     category,
     url,
-    raw_payload: { slug, serviceText: serviceText.slice(0, 500) },
+    raw_payload: { slug, dataText, localText, horarioText },
   }
 }
 
