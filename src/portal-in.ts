@@ -1,3 +1,14 @@
+/**
+ * Portal IN Restaurant Scraper
+ * 
+ * This script imports restaurants from the Portal IN article about new restaurants in Salvador.
+ * The article features 20 new restaurants opened in 2025.
+ * 
+ * Source: https://www.portalin.com.br/notas/conheca-20-novos-restaurantes-para-saborear-em-salvador/
+ * 
+ * Usage: npx tsx src/portal-in.ts
+ */
+
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 dotenv.config()

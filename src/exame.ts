@@ -1,3 +1,14 @@
+/**
+ * Exame Casual 2025 Restaurant Scraper
+ * 
+ * This script imports restaurants from the Exame Casual 2025 ranking article.
+ * The article features 8 restaurants from Salvador with detailed information.
+ * 
+ * Source: https://exame.com/casual/os-melhores-restaurantes-de-salvador-segundo-ranking-exame-casual-2025/
+ * 
+ * Usage: npx tsx src/exame.ts
+ */
+
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 dotenv.config()

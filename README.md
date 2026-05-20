@@ -1,15 +1,26 @@
 # Agenda Cultural Salvador — Scraper
 
-Backend responsável por buscar eventos culturais de múltiplas fontes e salvar no Supabase.
+Backend responsável por buscar eventos culturais e restaurantes de múltiplas fontes e salvar no Supabase.
 
 ## Scrapers
+
+### Eventos
 
 | Fonte | Arquivo | Eventos | Status |
 |-------|---------|---------|--------|
 | **Sympla** | `src/sympla.ts` | ~425 | ✅ Ativo |
 | **El Cabong** | `src/elcabong.ts` | ~170 | ✅ Ativo |
+| **salvadordabahia.com** | `src/salvadordabahia.ts` | ~83 | ✅ Ativo |
 | **Instagram Vision** | `src/instagram-vision.ts` | ~35 | ✅ Ativo |
-| **Instagram Apify** | `src/scrapers/instagram-apify/` | ~35/dia | 🔄 Em desenvolvimento |
+| **Instagram Apify** | `src/instagram-apify.ts` | ~35/dia | 🔄 Em desenvolvimento |
+
+### Restaurantes
+
+| Fonte | Arquivo | Restaurantes | Status |
+|-------|---------|--------------|--------|
+| **Exame Casual 2025** | `src/exame.ts` | 8 | ✅ Ativo |
+| **CNN Brasil V&G** | `src/cnn-restaurants.ts` | 4 | ✅ Ativo |
+| **Portal IN** | `src/portal-in.ts` | 18 | ✅ Ativo |
 
 ## Setup
 
@@ -37,8 +48,18 @@ npm run build
 ## Rodar local
 
 ```bash
-# Todos os scrapers
+# Todos os scrapers de eventos
 npm run dev
+
+# Scraper específico
+npx tsx src/sympla.ts
+npx tsx src/elcabong.ts
+npx tsx src/salvadordabahia.ts
+
+# Scrapers de restaurantes
+npx tsx src/exame.ts
+npx tsx src/cnn-restaurants.ts
+npx tsx src/portal-in.ts
 
 # Apenas build
 npm run build
@@ -51,44 +72,25 @@ src/
 ├── index.ts                    # Orquestrador principal
 ├── sympla.ts                   # Scraper Sympla
 ├── elcabong.ts                 # Scraper El Cabong
-├── instagram-vision.ts         # Scraper Instagram (Gemini Vision)
-├── scrapers/
-│   └── instagram-apify/        # Scraper Instagram (Apify)
-│       ├── apify-adapter.ts    # Integração com Apify
-│       ├── text-processor.ts   # Extração de eventos do caption
-│       ├── event-aggregator.ts # Deduplicação e estatísticas
-│       ├── content-detector.ts # Detecção de tipo de conteúdo
-│       └── image-processor.ts  # Extração via Gemini Vision
-├── types/
-│   └── instagram.types.ts      # Tipos TypeScript do Instagram
+├── salvadordabahia.ts          # Scraper salvadordabahia.com
+├── instagram-vision.ts          # Scraper Instagram (Gemini Vision)
+├── instagram-apify.ts          # Scraper Instagram (Apify)
+├── exame.ts                    # Scraper Exame Casual 2025 (restaurantes)
+├── cnn-restaurants.ts          # Scraper CNN Brasil V&G (restaurantes)
+├── portal-in.ts                # Scraper Portal IN (restaurantes)
 ├── supabase.ts                  # Cliente Supabase
 └── types.ts                     # Tipos principais
 
-scripts/                         # Sistema de cache local
-├── fetch-instagram-posts.js    # Busca posts via Apify (1x/dia)
-├── process-cached-posts.js     # Processa cache (sem custo)
-├── list-events-by-date.js      # Lista eventos por data
-├── summary-events.js           # Resumo executivo
-└── view-cache.js               # Info do cache
+scripts/                         # Scripts utilitários
+├── run-sympla.ts              # Executa scraper Sympla
+├── run-elcabong.ts            # Executa scraper El Cabong
+├── run-salvadordabahia.ts     # Executa scraper salvadordabahia
+└── run-instagram.ts           # Executa scraper Instagram
 
 tests/                           # Scripts de teste
 cache/                           # Cache local (gitignored)
 docs/                            # Documentação técnica
-```
-
-## Sistema de Cache (Instagram Apify)
-
-Economiza créditos do Apify — busca 1x, processa N vezes:
-
-```bash
-# 1. Buscar posts via Apify (~10 créditos)
-node scripts/fetch-instagram-posts.js
-
-# 2. Processar posts do cache (0 créditos)
-node scripts/process-cached-posts.js
-
-# 3. Ver resumo
-node scripts/summary-events.js
+migrations/                      # Migrations SQL
 ```
 
 ## Deploy
@@ -100,6 +102,7 @@ GitHub Actions roda diariamente às **03:00 BRT**:
 
 Supabase (compartilhado com `agenda-cultural-web`):
 - `events` — todos os eventos
+- `restaurants` — restaurantes curados
 - `scrape_runs` — histórico de execuções
 
 ## Notas
@@ -107,3 +110,20 @@ Supabase (compartilhado com `agenda-cultural-web`):
 - Scraper é idempotente: upsert por `(source, external_id)`
 - Métricas registradas em `scrape_runs`
 - Cache local em `cache/` (ignorado pelo Git)
+
+## Fontes de Restaurantes
+
+### Exame Casual 2025
+- Ranking nacional dos melhores restaurantes de Salvador
+- 8 restaurantes com ranking, descrição detalhada, preço médio
+- URL: https://exame.com/casual/os-melhores-restaurantes-de-salvador-segundo-ranking-exame-casual-2025/
+
+### CNN Brasil V&G
+- Curadoria local de Felipe Almeida
+- 7 restaurantes com descrição, horário, Instagram
+- URL: https://www.cnnbrasil.com.br/viagemegastronomia/gastronomia/onde-comer-em-salvador-7-restaurantes-para-conhecer-na-capital-baiana/
+
+### Portal IN
+- Novos restaurantes abertos em 2025
+- 20 restaurantes com bairro, tipo de cozinha, Instagram
+- URL: https://www.portalin.com.br/notas/conheca-20-novos-restaurantes-para-saborear-em-salvador/

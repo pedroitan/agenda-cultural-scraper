@@ -1,3 +1,18 @@
+/**
+ * Agenda Cultural Scraper - Main Entry Point
+ * 
+ * This script orchestrates all scrapers for the Agenda Cultural Salvador project.
+ * It runs scrapers for multiple sources (Sympla, El Cabong, salvadordabahia.com, Instagram)
+ * and manages the scrape runs in Supabase for tracking and monitoring.
+ * 
+ * Environment Variables:
+ * - SCRAPE_CITY: Target city ('salvador', 'rio-de-janeiro', 'sao-paulo')
+ * - SCRAPE_UNTIL_DAYS: Number of days to scrape into the future (default: 90)
+ * - USE_INSTAGRAM_APIFY: Use Apify API for Instagram scraping (default: false)
+ * 
+ * Usage: npx tsx src/index.ts
+ */
+
 import 'dotenv/config'
 
 import { z } from 'zod'
@@ -10,12 +25,14 @@ import { runInstagramApifyScrape } from './instagram-apify.js'
 import { supabase } from './supabase.js'
 import type { EventInput, ScrapeRunInsert, ScraperInput } from './types.js'
 
+// Environment variable validation
 const EnvSchema = z.object({
   SCRAPE_CITY: z.enum(['salvador', 'rio-de-janeiro', 'sao-paulo']).default('salvador'),
   SCRAPE_UNTIL_DAYS: z.coerce.number().int().positive().default(90),
   USE_INSTAGRAM_APIFY: z.string().optional().transform(v => v === 'true'),
 })
 
+// Metrics tracked for each scrape run
 type RunMetrics = {
   items_fetched: number
   items_valid: number
@@ -23,6 +40,12 @@ type RunMetrics = {
   items_upserted: number
 }
 
+/**
+ * Creates a new scrape run record in Supabase
+ * @param source - The scraper source name (sympla, elcabong, etc.)
+ * @param city - The target city
+ * @returns The created scrape run record with ID
+ */
 async function createRun(source: string, city: string) {
   const insert: ScrapeRunInsert = {
     source,
@@ -40,6 +63,13 @@ async function createRun(source: string, city: string) {
   return data as { id: string }
 }
 
+/**
+ * Finalizes a scrape run with status and metrics
+ * @param runId - The scrape run ID
+ * @param status - Final status ('success' or 'failed')
+ * @param metrics - Scrape metrics
+ * @param errorMessage - Error message if failed
+ */
 async function finalizeRun(
   runId: string,
   status: 'success' | 'failed',
@@ -62,6 +92,12 @@ async function finalizeRun(
   if (error) throw error
 }
 
+/**
+ * Upserts events to Supabase using external_id for deduplication
+ * Updates existing events (image_url, url, title, etc.) instead of creating duplicates
+ * @param events - Array of events to upsert
+ * @returns Number of events upserted
+ */
 async function upsertEvents(events: EventInput[]) {
   if (events.length === 0) return 0
 
@@ -78,6 +114,10 @@ async function upsertEvents(events: EventInput[]) {
   return events.length
 }
 
+/**
+ * Main function that orchestrates all scrapers
+ * Configured by environment variables to target specific city and date range
+ */
 async function main() {
   const env = EnvSchema.parse(process.env)
   const city = env.SCRAPE_CITY

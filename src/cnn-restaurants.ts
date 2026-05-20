@@ -1,3 +1,14 @@
+/**
+ * CNN Brasil V&G Restaurant Scraper
+ * 
+ * This script imports restaurants from the CNN Brasil V&G article about Salvador restaurants.
+ * The article features 7 restaurants curated by Felipe Almeida.
+ * 
+ * Source: https://www.cnnbrasil.com.br/viagemegastronomia/gastronomia/onde-comer-em-salvador-7-restaurantes-para-conhecer-na-capital-baiana/
+ * 
+ * Usage: npx tsx src/cnn-restaurants.ts
+ */
+
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
 dotenv.config()
