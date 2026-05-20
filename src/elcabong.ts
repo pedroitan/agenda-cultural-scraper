@@ -8,104 +8,36 @@ type ElCabongScrapeResult = {
   items_fetched: number
 }
 
-// Extract additional details from an event detail page
-async function extractEventDetails(page: any, url: string): Promise<{
-  description?: string
-  performers?: string
-  duration?: string
-  age_restriction?: string
-  organizer?: string
-}> {
+// El Cabong has structured data via JSON-LD (schema.org/Event)
+// We can extract description, performer, and other details from the JSON-LD
+
+function extractJsonLd(html: string): any {
+  const match = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/i)
+  if (!match) return null
+  
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
-    await page.waitForTimeout(1000)
-
-    const details = await page.evaluate(() => {
-      const result: any = {}
-
-      // Description - try multiple selectors
-      const descSelectors = [
-        '.wpem-event-description',
-        '.event-description',
-        '.description',
-        'div[class*="description"]',
-        '.wpem-single-event-description'
-      ]
-      for (const selector of descSelectors) {
-        const el = document.querySelector(selector) as HTMLElement
-        if (el) {
-          result.description = el.textContent?.trim()
-          break
-        }
-      }
-
-      // Performers/Artists
-      const perfSelectors = [
-        '.wpem-event-performer',
-        '.event-performer',
-        '[class*="performer"]',
-        '[class*="artist"]'
-      ]
-      for (const selector of perfSelectors) {
-        const el = document.querySelector(selector) as HTMLElement
-        if (el) {
-          result.performers = el.textContent?.trim()
-          break
-        }
-      }
-
-      // Duration
-      const durSelectors = [
-        '.wpem-event-duration',
-        '.event-duration',
-        '[class*="duration"]'
-      ]
-      for (const selector of durSelectors) {
-        const el = document.querySelector(selector) as HTMLElement
-        if (el) {
-          result.duration = el.textContent?.trim()
-          break
-        }
-      }
-
-      // Age restriction
-      const ageSelectors = [
-        '.wpem-event-age',
-        '.event-age',
-        '[class*="age"]',
-        '[class*="classification"]'
-      ]
-      for (const selector of ageSelectors) {
-        const el = document.querySelector(selector) as HTMLElement
-        if (el) {
-          result.age_restriction = el.textContent?.trim()
-          break
-        }
-      }
-
-      // Organizer
-      const orgSelectors = [
-        '.wpem-event-organizer',
-        '.event-organizer',
-        '[class*="organizer"]',
-        '[class*="organizer-name"]'
-      ]
-      for (const selector of orgSelectors) {
-        const el = document.querySelector(selector) as HTMLElement
-        if (el) {
-          result.organizer = el.textContent?.trim()
-          break
-        }
-      }
-
-      return result
-    })
-
-    return details
-  } catch (err) {
-    console.error(`  Error extracting details from ${url}:`, err)
-    return {}
+    const json = JSON.parse(match[1])
+    // If it's an array, find the Event type
+    if (Array.isArray(json)) {
+      return json.find(item => item['@type'] === 'Event')
+    }
+    // If it's a single object and is Event type
+    if (json['@type'] === 'Event') {
+      return json
+    }
+    return null
+  } catch {
+    return null
   }
+}
+
+function sanitizeHtml(html: string): string {
+  // Remove dangerous tags but keep formatting tags (strong, b, em, i, br, p, ul, li)
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<(?!\/?(?:strong|b|em|i|br|p|ul|ol|li|h[1-6]|span|div)\b)[^>]+>/gi, '')
+    .trim()
 }
 
 // Parse date like "28-01-2026 @ 19:00" or "11/12/2025 - 21:00" to ISO string
@@ -336,7 +268,7 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     console.log(`  Found ${events.length} events on page`)
 
     // Parse all events (no I/O)
-    type ParsedEvent = { externalId: string; title: string; startDatetime: string; location: string; url: string; imageUrl: string | null; raw: typeof events[0] }
+    type ParsedEvent = { externalId: string; title: string; startDatetime: string; location: string; url: string; imageUrl: string | null; raw: typeof events[0]; description?: string; performers?: string; organizer?: string }
     const parsed: ParsedEvent[] = []
     for (const ev of events) {
       if (!ev.title || !ev.date) continue
@@ -350,15 +282,44 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     }
 
     console.log(`  Extracted ${parsed.length} events from list`)
-    console.log(`  Visiting detail pages to extract additional info...`)
 
-    // Visit each event detail page to extract additional information
-    for (let i = 0; i < parsed.length; i++) {
-      const ev = parsed[i]
-      console.log(`  [${i + 1}/${parsed.length}] Fetching details for: ${ev.title}`)
-      const details = await extractEventDetails(page, ev.url)
-      await page.waitForTimeout(500) // Rate limiting between requests
+    // Phase 2: Fetch individual event pages to get details from JSON-LD
+    const detailLimit = Number(process.env.ELCABONG_DETAIL_LIMIT || '0') // 0 = all events
+    const eventsToFetch = detailLimit > 0 ? parsed.slice(0, detailLimit) : parsed
+    console.log(`\nFetching details for ${eventsToFetch.length} events (limit: ${detailLimit})...`)
 
+    for (let i = 0; i < eventsToFetch.length; i++) {
+      const ev = eventsToFetch[i]
+      try {
+        console.log(`[${i + 1}/${eventsToFetch.length}] Fetching details: ${ev.title.slice(0, 50)}`)
+        await page.goto(ev.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+        const html = await page.content()
+        const jsonLd = extractJsonLd(html)
+        
+        if (jsonLd) {
+          // Extract details from JSON-LD
+          const rawDescription = jsonLd.description || undefined
+          const description = rawDescription ? sanitizeHtml(rawDescription) : undefined
+          const performer = jsonLd.performer || undefined
+          const organizer = jsonLd.Organizer?.name || undefined
+          // duration and age_restriction not available in JSON-LD
+          
+          // Update the event with details (only if not empty)
+          if (description) ev.description = description
+          if (performer) ev.performers = typeof performer === 'string' ? performer : (Array.isArray(performer) ? performer.map((p: any) => p.name || p).join(', ') : undefined)
+          if (organizer) ev.organizer = organizer
+          console.log(`  ✓ Details fetched`)
+        } else {
+          console.log(`  ✗ No JSON-LD found`)
+        }
+        
+        await page.waitForTimeout(500)
+      } catch (err) {
+        console.error(`  ✗ Error: ${err}`)
+      }
+    }
+    
+    for (const ev of parsed) {
       valid.push({
         source: 'elcabong',
         external_id: ev.externalId,
@@ -370,17 +331,17 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         category: 'Shows e Festas',
         is_free: false,
         url: ev.url,
-        description: details.description,
-        performers: details.performers,
-        duration: details.duration,
-        age_restriction: details.age_restriction,
-        organizer: details.organizer,
-        raw_payload: { ...ev.raw, details },
+        description: ev.description || undefined,
+        performers: ev.performers || undefined,
+        organizer: ev.organizer || undefined,
+        duration: undefined,
+        age_restriction: undefined,
+        raw_payload: ev.raw,
       })
       items_fetched++
     }
 
-    // Close browser after fetching all details
+    // Close browser
     await browser.close()
     console.log(`  Browser closed.`)
   } catch (err) {
