@@ -8,6 +8,106 @@ type ElCabongScrapeResult = {
   items_fetched: number
 }
 
+// Extract additional details from an event detail page
+async function extractEventDetails(page: any, url: string): Promise<{
+  description?: string
+  performers?: string
+  duration?: string
+  age_restriction?: string
+  organizer?: string
+}> {
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
+    await page.waitForTimeout(1000)
+
+    const details = await page.evaluate(() => {
+      const result: any = {}
+
+      // Description - try multiple selectors
+      const descSelectors = [
+        '.wpem-event-description',
+        '.event-description',
+        '.description',
+        'div[class*="description"]',
+        '.wpem-single-event-description'
+      ]
+      for (const selector of descSelectors) {
+        const el = document.querySelector(selector) as HTMLElement
+        if (el) {
+          result.description = el.textContent?.trim()
+          break
+        }
+      }
+
+      // Performers/Artists
+      const perfSelectors = [
+        '.wpem-event-performer',
+        '.event-performer',
+        '[class*="performer"]',
+        '[class*="artist"]'
+      ]
+      for (const selector of perfSelectors) {
+        const el = document.querySelector(selector) as HTMLElement
+        if (el) {
+          result.performers = el.textContent?.trim()
+          break
+        }
+      }
+
+      // Duration
+      const durSelectors = [
+        '.wpem-event-duration',
+        '.event-duration',
+        '[class*="duration"]'
+      ]
+      for (const selector of durSelectors) {
+        const el = document.querySelector(selector) as HTMLElement
+        if (el) {
+          result.duration = el.textContent?.trim()
+          break
+        }
+      }
+
+      // Age restriction
+      const ageSelectors = [
+        '.wpem-event-age',
+        '.event-age',
+        '[class*="age"]',
+        '[class*="classification"]'
+      ]
+      for (const selector of ageSelectors) {
+        const el = document.querySelector(selector) as HTMLElement
+        if (el) {
+          result.age_restriction = el.textContent?.trim()
+          break
+        }
+      }
+
+      // Organizer
+      const orgSelectors = [
+        '.wpem-event-organizer',
+        '.event-organizer',
+        '[class*="organizer"]',
+        '[class*="organizer-name"]'
+      ]
+      for (const selector of orgSelectors) {
+        const el = document.querySelector(selector) as HTMLElement
+        if (el) {
+          result.organizer = el.textContent?.trim()
+          break
+        }
+      }
+
+      return result
+    })
+
+    return details
+  } catch (err) {
+    console.error(`  Error extracting details from ${url}:`, err)
+    return {}
+  }
+}
+
 // Parse date like "28-01-2026 @ 19:00" or "11/12/2025 - 21:00" to ISO string
 function parseElCabongDate(dateStr: string): string | null {
   // Format 1: "28-01-2026 @ 19:00" (new format with dashes and @)
@@ -249,12 +349,16 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
       parsed.push({ externalId, title: ev.title, startDatetime, location: ev.location!, url: ev.url!, imageUrl: ev.imageUrl, raw: ev })
     }
 
-    // Close browser — no need to download images, use original URLs
-    await browser.close()
-    console.log(`  Browser closed. Using original image URLs from El Cabong...`)
+    console.log(`  Extracted ${parsed.length} events from list`)
+    console.log(`  Visiting detail pages to extract additional info...`)
 
-    for (const ev of parsed) {
-      // Use original El Cabong image URL directly — no upload to Supabase Storage
+    // Visit each event detail page to extract additional information
+    for (let i = 0; i < parsed.length; i++) {
+      const ev = parsed[i]
+      console.log(`  [${i + 1}/${parsed.length}] Fetching details for: ${ev.title}`)
+      const details = await extractEventDetails(page, ev.url)
+      await page.waitForTimeout(500) // Rate limiting between requests
+
       valid.push({
         source: 'elcabong',
         external_id: ev.externalId,
@@ -266,15 +370,19 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         category: 'Shows e Festas',
         is_free: false,
         url: ev.url,
-        description: undefined, // El Cabong scrapes from list view, not detail pages
-        performers: undefined,
-        duration: undefined,
-        age_restriction: undefined,
-        organizer: undefined,
-        raw_payload: ev.raw,
+        description: details.description,
+        performers: details.performers,
+        duration: details.duration,
+        age_restriction: details.age_restriction,
+        organizer: details.organizer,
+        raw_payload: { ...ev.raw, details },
       })
       items_fetched++
     }
+
+    // Close browser after fetching all details
+    await browser.close()
+    console.log(`  Browser closed.`)
   } catch (err) {
     console.error('Error scraping El Cabong:', err)
     invalid_count++
