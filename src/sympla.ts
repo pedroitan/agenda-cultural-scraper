@@ -1,4 +1,5 @@
 import type { EventInput, ScraperInput } from './types.js'
+import { chromium } from 'playwright'
 
 type SymplaScrapeResult = {
   valid: EventInput[]
@@ -56,7 +57,7 @@ function parseBrazilianDate(dateStr: string): string | null {
 }
 
 async function fetchHtmlWithRetry(url: string, headers: Record<string, string>) {
-  const timeoutMs = envNumber('REQUEST_TIMEOUT_MS', 15000)
+  const timeoutMs = envNumber('REQUEST_TIMEOUT_MS', 30000) // Increased to 30s
   const retryMax = envNumber('RETRY_MAX', 3)
 
   for (let attempt = 1; attempt <= retryMax; attempt++) {
@@ -67,11 +68,23 @@ async function fetchHtmlWithRetry(url: string, headers: Record<string, string>) 
       const res = await fetch(url, { headers, signal: controller.signal })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return await res.text()
+    } catch (err) {
+      if (attempt === retryMax) throw err
+      console.log(`  Retry ${attempt}/${retryMax} for ${url}`)
     } finally {
       clearTimeout(id)
     }
   }
   throw new Error('Unreachable')
+}
+
+function sanitizeHtml(html: string): string {
+  // Remove dangerous tags but keep formatting tags (strong, b, em, i, br, p, ul, li)
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<(?!\/?(?:strong|b|em|i|br|p|ul|ol|li|h[1-6]|span)\b)[^>]+>/gi, '')
+    .trim()
 }
 
 function extractNextData(html: string): any {
@@ -85,13 +98,20 @@ function extractNextData(html: string): any {
   }
 }
 
-function extractEventFromHtml(html: string, eventId: string, url: string, input: ScraperInput): EventInput | null {
+export function extractEventFromHtml(html: string, eventId: string, url: string, input: ScraperInput): EventInput | null {
   // Try to extract event data from __NEXT_DATA__ in the event page
   const nextData = extractNextData(html)
   if (nextData) {
     // Look for event data in pageProps
     const pageProps = nextData?.props?.pageProps
-    const eventData = pageProps?.event || pageProps?.data || pageProps
+    
+    // Try new structure (hydrationData.eventHydration.event)
+    let eventData = pageProps?.hydrationData?.eventHydration?.event
+    
+    // Fallback to old structure
+    if (!eventData) {
+      eventData = pageProps?.event || pageProps?.data || pageProps
+    }
     
     if (eventData && (eventData.name || eventData.title)) {
       const title = eventData.name || eventData.title
@@ -102,11 +122,12 @@ function extractEventFromHtml(html: string, eventId: string, url: string, input:
       const price = eventData.price || eventData.price_text || eventData.priceText
 
       // Extract additional fields from eventData
-      const description = eventData.description || eventData.description_text || eventData.long_description || eventData.summary || undefined
+      const rawDescription = eventData.detail || eventData.description || eventData.description_text || eventData.long_description || eventData.summary || eventData.details?.pt?.text || undefined
+      const description = rawDescription ? sanitizeHtml(rawDescription) : undefined
       const performers = eventData.artists || eventData.performers || eventData.lineup || eventData.hosts || undefined
       const duration = eventData.duration || eventData.expected_duration || undefined
       const ageRestriction = eventData.age_restriction || eventData.ageRestriction || eventData.classification || eventData.rating || undefined
-      const organizer = eventData.organizer?.name || eventData.organization?.name || eventData.producer?.name || eventData.host?.name || undefined
+      const organizer = eventData.eventsHost?.name || eventData.organizer?.name || eventData.organization?.name || eventData.producer?.name || eventData.host?.name || undefined
 
       if (title && startDate) {
         return {
@@ -502,36 +523,45 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
     console.error(`Error fetching main:`, err)
   }
 
-  // Phase 3: If we still don't have enough events, fetch individual event pages
-  // to get more details for events we found
-  const eventsNeedingDetails = valid.filter(e => !e.venue_name || e.title.startsWith('Event '))
-  console.log(`\n${eventsNeedingDetails.length} events need more details...`)
-  
-  // Only fetch details from bileto.sympla.com.br (www.sympla.com.br/evento/ blocks Node.js fetch)
-  const fetchableDetails = eventsNeedingDetails.filter(e => e.url?.includes('bileto.sympla.com.br'))
-  console.log(`${fetchableDetails.length} events with fetchable detail URLs (bileto.sympla.com.br)`)
+  // Phase 3: Fetch individual event pages to get detailed information (description, performers, etc.)
+  const detailLimit = envNumber('SYMPLA_DETAIL_LIMIT', 0) // 0 = all events, set to >0 for testing
+  const eventsToFetch = detailLimit > 0 ? valid.slice(0, detailLimit) : valid
+  console.log(`\nFetching details for ${eventsToFetch.length} events (limit: ${detailLimit})...`)
 
-  for (const ev of fetchableDetails.slice(0, 50)) {
-    try {
-      console.log(`Fetching details: ${ev.url}`)
-      const html = await fetchHtmlWithRetry(ev.url, headers)
-      const detailed = extractEventFromHtml(html, ev.external_id, ev.url, input)
-      
-      if (detailed && detailed.title && !detailed.title.includes('Sympla - Ingressos')) {
-        // Update the event with better data
-        ev.title = detailed.title
-        ev.start_datetime = detailed.start_datetime
-        ev.venue_name = detailed.venue_name || ev.venue_name
-        ev.image_url = detailed.image_url || ev.image_url
-        ev.price_text = detailed.price_text || ev.price_text
-        console.log(`  ✓ Updated: ${ev.title.slice(0, 40)}...`)
+  // Use Playwright to avoid fetch blocking
+  const browser = await chromium.launch({ headless: true })
+  const page = await browser.newPage()
+  
+  try {
+    for (let i = 0; i < eventsToFetch.length; i++) {
+      const ev = eventsToFetch[i]
+      try {
+        console.log(`[${i + 1}/${eventsToFetch.length}] Fetching details: ${ev.title.slice(0, 50)}`)
+        await page.goto(ev.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+        const html = await page.content()
+        const detailed = extractEventFromHtml(html, ev.external_id, ev.url, input)
+        
+        if (detailed) {
+          // Update with detailed information
+          ev.description = detailed.description || ev.description
+          ev.performers = detailed.performers || ev.performers
+          ev.duration = detailed.duration || ev.duration
+          ev.age_restriction = detailed.age_restriction || ev.age_restriction
+          ev.organizer = detailed.organizer || ev.organizer
+          // Also update basic fields if they were missing
+          if (!ev.venue_name && detailed.venue_name) ev.venue_name = detailed.venue_name
+          if (!ev.image_url && detailed.image_url) ev.image_url = detailed.image_url
+          console.log(`  ✓ Details fetched`)
+        }
+        
+        await delay(500)
+      } catch (err) {
+        console.error(`  ✗ Error: ${err}`)
+        // Don't mark as invalid, just skip details
       }
-      
-      await delay(300)
-    } catch (err) {
-      console.error(`  ✗ Error: ${err}`)
-      invalid_count++
     }
+  } finally {
+    await browser.close()
   }
 
   console.log(`\nScrape complete: ${valid.length} valid, ${invalid_count} invalid, ${items_fetched} fetched`)
