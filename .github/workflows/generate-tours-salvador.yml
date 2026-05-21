@@ -35,7 +35,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SCRAPE_CITY: salvador
           FORCE_REGENERATE: 'false'
-        run: npx tsx generate-weekend-tours.ts
+        run: npx tsx scripts/generate-weekend-tours.ts
 
       - name: Generate weekend tours (Quinta - atualização forçada)
         if: github.event.schedule == '0 14 * * 4'
@@ -45,7 +45,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SCRAPE_CITY: salvador
           FORCE_REGENERATE: 'true'
-        run: npx tsx generate-weekend-tours.ts
+        run: npx tsx scripts/generate-weekend-tours.ts
 
       - name: Generate weekend tours (manual)
         if: github.event_name == 'workflow_dispatch'
@@ -55,4 +55,4 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SCRAPE_CITY: salvador
           FORCE_REGENERATE: ${{ github.event.inputs.force_regenerate }}
-        run: npx tsx generate-weekend-tours.ts
+        run: npx tsx scripts/generate-weekend-tours.ts

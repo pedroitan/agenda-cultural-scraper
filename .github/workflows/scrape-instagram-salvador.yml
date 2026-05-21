@@ -37,4 +37,4 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SCRAPE_CITY: salvador
           USE_INSTAGRAM_APIFY: 'false'
-        run: npx tsx run-instagram.ts
+        run: npx tsx scripts/run-instagram.ts
