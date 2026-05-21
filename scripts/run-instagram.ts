@@ -1,10 +1,10 @@
 import 'dotenv/config'
 
 import { z } from 'zod'
-import { runInstagramVisionScrape } from './src/instagram-vision.js'
-import { runInstagramApifyScrape } from './src/instagram-apify.js'
-import { supabase } from './src/supabase.js'
-import type { EventInput, ScrapeRunInsert, ScraperInput } from './src/types.js'
+import { runInstagramVisionScrape } from '../src/instagram-vision.js'
+import { runInstagramApifyScrape } from '../src/instagram-apify.js'
+import { supabase } from '../src/supabase.js'
+import type { EventInput, ScrapeRunInsert, ScraperInput } from '../src/types.js'
 
 const EnvSchema = z.object({
   SCRAPE_CITY: z.enum(['salvador']).default('salvador'),

@@ -1,9 +1,9 @@
 import 'dotenv/config'
 
 import { z } from 'zod'
-import { runElCabongScrape } from './src/elcabong.js'
-import { supabase } from './src/supabase.js'
-import type { EventInput, ScrapeRunInsert, ScraperInput } from './src/types.js'
+import { runElCabongScrape } from '../src/elcabong.js'
+import { supabase } from '../src/supabase.js'
+import type { EventInput, ScrapeRunInsert, ScraperInput } from '../src/types.js'
 
 const EnvSchema = z.object({
   SCRAPE_CITY: z.enum(['salvador']).default('salvador'),

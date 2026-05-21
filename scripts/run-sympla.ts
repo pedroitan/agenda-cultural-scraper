@@ -1,9 +1,9 @@
 import 'dotenv/config'
 
 import { z } from 'zod'
-import { runSymplaScrape } from './src/sympla.js'
-import { supabase } from './src/supabase.js'
-import type { EventInput, ScrapeRunInsert, ScraperInput } from './src/types.js'
+import { runSymplaScrape } from '../src/sympla.js'
+import { supabase } from '../src/supabase.js'
+import type { EventInput, ScrapeRunInsert, ScraperInput } from '../src/types.js'
 
 const EnvSchema = z.object({
   SCRAPE_CITY: z.enum(['salvador', 'rio-de-janeiro', 'sao-paulo']).default('salvador'),
