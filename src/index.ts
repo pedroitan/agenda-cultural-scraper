@@ -1,15 +1,25 @@
 /**
  * Agenda Cultural Scraper - Main Entry Point
- * 
+ *
  * This script orchestrates all scrapers for the Agenda Cultural Salvador project.
  * It runs scrapers for multiple sources (Sympla, El Cabong, salvadordabahia.com, Instagram)
  * and manages the scrape runs in Supabase for tracking and monitoring.
- * 
+ *
  * Environment Variables:
  * - SCRAPE_CITY: Target city ('salvador', 'rio-de-janeiro', 'sao-paulo')
  * - SCRAPE_UNTIL_DAYS: Number of days to scrape into the future (default: 90)
  * - USE_INSTAGRAM_APIFY: Use Apify API for Instagram scraping (default: false)
- * 
+ *   - false: Instagram Vision (extracts from images only)
+ *   - true: Instagram Apify (extracts from caption, images, and messages)
+ *
+ * Instagram Scraper Configuration:
+ * - When USE_INSTAGRAM_APIFY=false: Uses Instagram Vision (Playwright + Gemini Vision)
+ *   - Requires: GEMINI_API_KEY
+ *   - Extracts events from images only
+ * - When USE_INSTAGRAM_APIFY=true: Uses Instagram Apify
+ *   - Requires: APIFY_TOKEN + GEMINI_API_KEY
+ *   - Extracts events from caption text, images, and author comments
+ *
  * Usage: npx tsx src/index.ts
  */
 

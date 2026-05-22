@@ -6,6 +6,33 @@ import { runInstagramApifyScrape } from '../src/instagram-apify.js'
 import { supabase } from '../src/supabase.js'
 import type { EventInput, ScrapeRunInsert, ScraperInput } from '../src/types.js'
 
+/**
+ * Instagram Scraper - Run Script
+ *
+ * Este script suporta dois métodos de scraping do Instagram:
+ *
+ * 1. INSTAGRAM VISION (USE_INSTAGRAM_APIFY=false):
+ *    - Usa Playwright para navegar no Instagram
+ *    - Extrai eventos de IMAGENS usando Gemini Vision AI
+ *    - NÃO extrai texto do caption
+ *    - Requer: GEMINI_API_KEY
+ *    - Melhor para: posts com agendas em formato de imagem (stories, carrosséis)
+ *
+ * 2. INSTAGRAM APIFY (USE_INSTAGRAM_APIFY=true):
+ *    - Usa Apify API para buscar posts
+ *    - Extrai eventos de TRÊS fontes:
+ *      - Caption/texto do post (TextProcessor)
+ *      - Imagens (Gemini Vision)
+ *      - Mensagens/comentários do autor
+ *    - Requer: APIFY_TOKEN + GEMINI_API_KEY
+ *    - Melhor para: posts com agendas em texto no caption
+ *
+ * Variáveis de ambiente:
+ * - USE_INSTAGRAM_APIFY: "true" para Apify, "false" para Vision (padrão: false)
+ * - GEMINI_API_KEY: Chave do Google Gemini Vision (obrigatório para ambos)
+ * - APIFY_TOKEN: Chave do Apify (obrigatório apenas para Apify)
+ */
+
 const EnvSchema = z.object({
   SCRAPE_CITY: z.enum(['salvador']).default('salvador'),
   SCRAPE_UNTIL_DAYS: z.coerce.number().int().positive().default(90),
