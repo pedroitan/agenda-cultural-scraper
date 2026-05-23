@@ -14,7 +14,7 @@ export interface ApifyInstagramOptions {
 export class ApifyAdapter {
   private client: ApifyClient
   private cacheDir: string
-  private cacheTTL: number = 24 * 60 * 60 * 1000 // 24 horas
+  private cacheTTL: number = 6 * 60 * 60 * 1000 // 6 horas (reduzido de 24h para pegar posts novos mais rápido)
   private loggedFields: boolean = false
 
   constructor(token: string) {
