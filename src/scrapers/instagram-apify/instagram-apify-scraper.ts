@@ -244,21 +244,56 @@ export class InstagramApifyScraper {
 
   /**
    * Extrai categoria do título do evento
+   * Para Instagram Agenda Alternativa, assume Shows/Festas como padrão
    */
   private extractCategory(title: string): string {
     const lowerTitle = title.toLowerCase()
 
-    if (lowerTitle.includes('show') || lowerTitle.includes('música') || lowerTitle.includes('concerto')) {
+    // Palavras-chave para Shows
+    if (lowerTitle.includes('show') || 
+        lowerTitle.includes('música') || 
+        lowerTitle.includes('concerto') ||
+        lowerTitle.includes('dj') ||
+        lowerTitle.includes('sound system') ||
+        lowerTitle.includes('riddim') ||
+        lowerTitle.includes('reggae') ||
+        lowerTitle.includes('samba') ||
+        lowerTitle.includes('forró') ||
+        lowerTitle.includes('axé') ||
+        lowerTitle.includes('rock') ||
+        lowerTitle.includes('pop') ||
+        lowerTitle.includes('jazz') ||
+        lowerTitle.includes('blues') ||
+        lowerTitle.includes('eletrônica') ||
+        lowerTitle.includes('funk') ||
+        lowerTitle.includes('hip hop') ||
+        lowerTitle.includes('rap') ||
+        lowerTitle.includes('baile') ||
+        lowerTitle.includes('sessão') ||
+        lowerTitle.includes('live') ||
+        lowerTitle.includes('ao vivo')) {
       return 'Shows'
     }
+
+    // Palavras-chave para Festas
+    if (lowerTitle.includes('festa') || 
+        lowerTitle.includes('balada') ||
+        lowerTitle.includes('party') ||
+        lowerTitle.includes('night') ||
+        lowerTitle.includes('clube') ||
+        lowerTitle.includes('quinta') ||
+        lowerTitle.includes('sexta') ||
+        lowerTitle.includes('sábado') ||
+        lowerTitle.includes('domingo') ||
+        lowerTitle.includes('feriado')) {
+      return 'Festas'
+    }
+
     if (lowerTitle.includes('teatro') || lowerTitle.includes('peça')) {
       return 'Teatro'
     }
     if (lowerTitle.includes('exposição') || lowerTitle.includes('arte') || lowerTitle.includes('galeria')) {
       return 'Exposições'
-    }
-    if (lowerTitle.includes('festa') || lowerTitle.includes('balada')) {
-      return 'Festas'
     }
     if (lowerTitle.includes('cinema') || lowerTitle.includes('filme')) {
       return 'Cinema'
@@ -267,7 +302,8 @@ export class InstagramApifyScraper {
       return 'Oficinas'
     }
 
-    return 'Outros'
+    // Padrão para Instagram Agenda Alternativa: maioria são Shows/Festas
+    return 'Shows'
   }
 
   /**
