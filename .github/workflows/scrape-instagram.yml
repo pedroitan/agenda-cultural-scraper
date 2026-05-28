@@ -37,7 +37,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-          USE_INSTAGRAM_APIFY: 'true'
+          USE_INSTAGRAM_APIFY: 'false'
           SCRAPE_CITY: salvador
           SCRAPE_UNTIL_DAYS: 90
         run: npx tsx scripts/run-instagram.ts
