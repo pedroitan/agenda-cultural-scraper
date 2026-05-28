@@ -1,5 +1,6 @@
 import type { EventInput, ScraperInput } from './types.js'
 import { chromium } from 'playwright'
+import { categorizeEvent } from './utils/categorize.js'
 
 type SymplaScrapeResult = {
   valid: EventInput[]
@@ -98,7 +99,7 @@ function extractNextData(html: string): any {
   }
 }
 
-export function extractEventFromHtml(html: string, eventId: string, url: string, input: ScraperInput): EventInput | null {
+export async function extractEventFromHtml(html: string, eventId: string, url: string, input: ScraperInput): Promise<EventInput | null> {
   // Try to extract event data from __NEXT_DATA__ in the event page
   const nextData = extractNextData(html)
   if (nextData) {
@@ -130,6 +131,9 @@ export function extractEventFromHtml(html: string, eventId: string, url: string,
       const organizer = eventData.eventsHost?.name || eventData.organizer?.name || eventData.organization?.name || eventData.producer?.name || eventData.host?.name || undefined
 
       if (title && startDate) {
+        // Categorizar com IA
+        const categorization = await categorizeEvent(title, description)
+
         return {
           source: input.source,
           external_id: eventId,
@@ -140,6 +144,8 @@ export function extractEventFromHtml(html: string, eventId: string, url: string,
           image_url: imageUrl,
           is_free: Boolean(isFree),
           price_text: price,
+          category: categorization.category,
+          tags: categorization.tags,
           url,
           description,
           performers: Array.isArray(performers) ? performers.join(', ') : performers,
@@ -539,8 +545,8 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
         console.log(`[${i + 1}/${eventsToFetch.length}] Fetching details: ${ev.title.slice(0, 50)}`)
         await page.goto(ev.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
         const html = await page.content()
-        const detailed = extractEventFromHtml(html, ev.external_id, ev.url, input)
-        
+        const detailed = await extractEventFromHtml(html, ev.external_id, ev.url, input)
+
         if (detailed) {
           // Update with detailed information
           ev.description = detailed.description || ev.description

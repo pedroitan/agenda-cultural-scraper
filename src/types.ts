@@ -16,6 +16,7 @@ export type EventInput = {
   min_price?: number
   price_text?: string
   category?: string
+  tags?: string[]
   url: string
   description?: string
   performers?: string

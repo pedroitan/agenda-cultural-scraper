@@ -1,6 +1,7 @@
 import { chromium } from 'playwright'
 import type { EventInput, ScraperInput } from './types.js'
 import { uploadImageBuffer } from './utils/image-uploader.js'
+import { categorizeEvent } from './utils/categorize.js'
 
 type ElCabongScrapeResult = {
   valid: EventInput[]
@@ -320,6 +321,9 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
     }
     
     for (const ev of parsed) {
+      // Categorizar com IA
+      const categorization = await categorizeEvent(ev.title, ev.description)
+
       valid.push({
         source: 'elcabong',
         external_id: ev.externalId,
@@ -328,7 +332,8 @@ export async function runElCabongScrape(input: ScraperInput): Promise<ElCabongSc
         city: input.city,
         venue_name: ev.location || undefined,
         image_url: ev.imageUrl || undefined,
-        category: 'Shows e Festas',
+        category: categorization.category,
+        tags: categorization.tags,
         is_free: false,
         url: ev.url,
         description: ev.description || undefined,
