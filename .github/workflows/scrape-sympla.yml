@@ -35,6 +35,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SCRAPE_CITY: salvador
           SCRAPE_UNTIL_DAYS: 90
         run: npx tsx scripts/run-sympla.ts
