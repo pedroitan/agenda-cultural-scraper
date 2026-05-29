@@ -534,40 +534,54 @@ export async function runSymplaScrape(input: ScraperInput): Promise<SymplaScrape
   const eventsToFetch = detailLimit > 0 ? valid.slice(0, detailLimit) : valid
   console.log(`\nFetching details for ${eventsToFetch.length} events (limit: ${detailLimit})...`)
 
-  // Use Playwright to avoid fetch blocking
-  const browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage()
-  
-  try {
-    for (let i = 0; i < eventsToFetch.length; i++) {
-      const ev = eventsToFetch[i]
-      try {
-        console.log(`[${i + 1}/${eventsToFetch.length}] Fetching details: ${ev.title.slice(0, 50)}`)
-        await page.goto(ev.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-        const html = await page.content()
-        const detailed = await extractEventFromHtml(html, ev.external_id, ev.url, input)
+  if (eventsToFetch.length === 0) {
+    console.log('Skipping Phase 3: no events to fetch details for')
+  } else {
+    // Use Playwright to avoid fetch blocking
+    const browser = await chromium.launch({ headless: true })
+    const page = await browser.newPage()
 
-        if (detailed) {
-          // Update with detailed information
-          ev.description = detailed.description || ev.description
-          ev.performers = detailed.performers || ev.performers
-          ev.duration = detailed.duration || ev.duration
-          ev.age_restriction = detailed.age_restriction || ev.age_restriction
-          ev.organizer = detailed.organizer || ev.organizer
-          // Also update basic fields if they were missing
-          if (!ev.venue_name && detailed.venue_name) ev.venue_name = detailed.venue_name
-          if (!ev.image_url && detailed.image_url) ev.image_url = detailed.image_url
-          console.log(`  ✓ Details fetched`)
+    let successCount = 0
+    let failCount = 0
+
+    try {
+      for (let i = 0; i < eventsToFetch.length; i++) {
+        const ev = eventsToFetch[i]
+        try {
+          console.log(`[${i + 1}/${eventsToFetch.length}] Fetching details: ${ev.title.slice(0, 50)}`)
+          await page.goto(ev.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+          const html = await page.content()
+          const detailed = await extractEventFromHtml(html, ev.external_id, ev.url, input)
+
+          if (detailed) {
+            // Update with detailed information
+            ev.description = detailed.description || ev.description
+            ev.performers = detailed.performers || ev.performers
+            ev.duration = detailed.duration || ev.duration
+            ev.age_restriction = detailed.age_restriction || ev.age_restriction
+            ev.organizer = detailed.organizer || ev.organizer
+            // Also update basic fields if they were missing
+            if (!ev.venue_name && detailed.venue_name) ev.venue_name = detailed.venue_name
+            if (!ev.image_url && detailed.image_url) ev.image_url = detailed.image_url
+            console.log(`  ✓ Details fetched (description: ${detailed.description ? 'yes' : 'no'})`)
+            successCount++
+          } else {
+            console.log(`  ✗ extractEventFromHtml returned null`)
+            failCount++
+          }
+
+          await delay(500)
+        } catch (err) {
+          console.error(`  ✗ Error: ${err}`)
+          failCount++
+          // Don't mark as invalid, just skip details
         }
-        
-        await delay(500)
-      } catch (err) {
-        console.error(`  ✗ Error: ${err}`)
-        // Don't mark as invalid, just skip details
       }
+    } finally {
+      await browser.close()
     }
-  } finally {
-    await browser.close()
+
+    console.log(`Phase 3 complete: ${successCount} successful, ${failCount} failed`)
   }
 
   console.log(`\nScrape complete: ${valid.length} valid, ${invalid_count} invalid, ${items_fetched} fetched`)
