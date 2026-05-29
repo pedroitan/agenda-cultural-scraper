@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio'
 import type { EventInput, ScraperInput } from './types.js'
+import { categorizeEvent } from './utils/categorize.js'
 
 type SalvadorScraperResult = {
   valid: EventInput[]
@@ -124,7 +125,7 @@ function extractEventLinks(html: string): string[] {
 }
 
 // Extrair dados de uma página de detalhe de evento
-export async function scrapeEventDetail(url: string): Promise<EventInput | null> {
+export async function scrapeEventDetail(url: string, input: ScraperInput): Promise<EventInput | null> {
   const html = await fetchHtml(url)
   if (!html) return null
 
@@ -245,16 +246,6 @@ export async function scrapeEventDetail(url: string): Promise<EventInput | null>
     price_text = 'Gratuito'
   }
 
-  // Categoria — inferir da URL ou do texto
-  let category: string | undefined
-  if (bodyLower.includes('exposição') || bodyLower.includes('exposicao')) category = 'Exposição'
-  else if (bodyLower.includes('teatro') || bodyLower.includes('espetáculo')) category = 'Teatro'
-  else if (bodyLower.includes('música') || bodyLower.includes('show') || bodyLower.includes('concerto')) category = 'Shows e Festas'
-  else if (bodyLower.includes('dança') || bodyLower.includes('dance')) category = 'Dança'
-  else if (bodyLower.includes('cinema') || bodyLower.includes('filme')) category = 'Cinema'
-  else if (bodyLower.includes('gastronomia') || bodyLower.includes('culinária')) category = 'Gastronomia'
-  else if (bodyLower.includes('workshop') || bodyLower.includes('oficina') || bodyLower.includes('palestra')) category = 'Cursos'
-
   // Descrição — pegar os parágrafos do conteúdo principal
   let description: string | undefined
   $('.sessao-conteudo .box-content p').each((_, el) => {
@@ -268,6 +259,11 @@ export async function scrapeEventDetail(url: string): Promise<EventInput | null>
       }
     }
   })
+
+  // Categoria — usar categorização IA para precisão
+  const categorization = await categorizeEvent(title, description)
+  const category = categorization.category
+  const tags = categorization.tags
 
   // Organizador — procurar por "Organizado por" ou similar
   let organizer: string | undefined
@@ -324,6 +320,7 @@ export async function scrapeEventDetail(url: string): Promise<EventInput | null>
     is_free,
     price_text,
     category,
+    tags,
     url,
     description,
     performers,
@@ -417,7 +414,7 @@ export async function runSalvadorDaBahiaScrape(input: ScraperInput): Promise<Sal
 
   for (const link of allLinks) {
     console.log(`[salvadordabahia] Scraping: ${link}`)
-    const event = await scrapeEventDetail(link)
+    const event = await scrapeEventDetail(link, input)
     if (event) {
       valid.push(event)
       console.log(`[salvadordabahia]  ✓ ${event.title} | ${event.start_datetime}`)
