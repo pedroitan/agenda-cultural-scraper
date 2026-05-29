@@ -27,6 +27,7 @@ const CATEGORIES = [
   'Festivais',
   'Cinema',
   'Dança',
+  'Copa do Mundo',
 ]
 
 const TAGS_MAP: Record<string, string[]> = {
@@ -41,6 +42,7 @@ const TAGS_MAP: Record<string, string[]> = {
   'Festivais': ['festival', 'feira', 'evento grande', 'multidão', 'edição', 'anual'],
   'Cinema': ['cinema', 'filme', 'sessão', 'screening', 'documentário', 'curta', 'longa'],
   'Dança': ['dança', 'ballet', 'contemporânea', 'clássica', 'coreografia', 'balé'],
+  'Copa do Mundo': ['copa do mundo', 'world cup', 'futebol', 'seleção', 'jogo', 'partida', 'assistência pública', 'fan fest'],
   'São João': ['são joão', 'junina', 'juninas', 'quadrilha', 'arrastão', 'forró pé de serra', 'baião', 'xote', 'xaxado', 'fogueira', 'pula fogueira', 'caipira', 'nordestina', 'campesina'],
 }
 
@@ -87,7 +89,15 @@ export async function categorizeEvent(
   const fallbackCategorize = (): CategorizationResult => {
     const text = `${title} ${description || ''}`.toLowerCase()
 
-    // Verificar São João primeiro (prioridade)
+    // Verificar Copa do Mundo primeiro (prioridade)
+    if (text.match(/copa do mundo|world cup|copa.*2026|seleção.*brasil|jogo.*copa|assistência.*pública|fan fest/i)) {
+      return {
+        category: 'Copa do Mundo',
+        tags: ['copa do mundo', 'futebol'],
+      }
+    }
+
+    // Verificar São João
     if (text.match(/são joão|junina|juninas|quadrilha|arrastão|forró pé de serra|baião|xote|xaxado|fogueira|pula fogueira|caipira|nordestina|campesina/)) {
       return {
         category: 'Shows e Festas',
