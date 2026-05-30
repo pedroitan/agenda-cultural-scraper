@@ -226,24 +226,54 @@ export async function scrapeEventDetail(url: string, input: ScraperInput): Promi
   // Venue
   let venue_name: string | undefined = localText || undefined
 
-  // Preço / gratuidade
-  const bodyLower = $('body').text().toLowerCase()
-  const is_free =
-    bodyLower.includes('entrada gratuita') ||
-    bodyLower.includes('gratuita') ||
-    bodyLower.includes('gratuito')
-
+  // Preço / gratuidade - verificação mais estrita
+  let is_free = false
   let price_text: string | undefined
-  // Procurar preço em parágrafos
+
+  // Primeiro, procurar preço explícito
   $('p').each((_, el) => {
     const text = $(el).text().trim()
     const precoMatch = text.match(/(?:valor|ingresso|entrada|pre[çc]o):\s*([^\n]+)/i)
     if (precoMatch && !price_text) {
-      price_text = precoMatch[1].trim()
+      const priceValue = precoMatch[1].trim().toLowerCase()
+      // Se o preço for indicado como gratuito, marca como free
+      if (priceValue.includes('gratuito') || priceValue.includes('gratuita') ||
+          priceValue.includes('entrada franca') || priceValue.includes('livre') ||
+          priceValue.includes('sem custo') || priceValue === 'grátis' ||
+          priceValue === 'gratis') {
+        is_free = true
+        price_text = 'Gratuito'
+      } else if (priceValue.match(/^\d+/) || priceValue.includes('r$')) {
+        // Se tiver número ou R$, não é gratuito
+        price_text = precoMatch[1].trim()
+        is_free = false
+      } else {
+        price_text = precoMatch[1].trim()
+      }
     }
   })
-  if (!price_text && is_free) {
-    price_text = 'Gratuito'
+
+  // Se não encontrou preço explícito, verificar no texto de forma mais estrita
+  if (!price_text) {
+    const bodyLower = $('body').text().toLowerCase()
+    // Verificar apenas frases que indiquem gratuidade explícita
+    const freePatterns = [
+      /entrada\s+gratuita/i,
+      /entrada\s+franca/i,
+      /gratuito/i,
+      /gratuita/i,
+      /livre\s+entrada/i,
+      /sem\s+custo/i,
+      /acesso\s+livre/i,
+    ]
+
+    for (const pattern of freePatterns) {
+      if (pattern.test(bodyLower)) {
+        is_free = true
+        price_text = 'Gratuito'
+        break
+      }
+    }
   }
 
   // Descrição — pegar os parágrafos do conteúdo principal
